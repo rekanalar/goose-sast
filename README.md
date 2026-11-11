@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.4.0";
+import sast from "rekanalar/goose-sast@v0.5.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.4.0";
+import sast from "rekanalar/goose-sast@v0.5.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -57,6 +57,8 @@ fn main() {
 | `read_policy(text, err) -> bool` | reads the policy JSON; false on a fault |
 | `read_advisories(text, err) -> bool` | reads the advisory JSON in the RustSec shape |
 | `check_deps(src, out) -> i64` | runs the ban, licence, source and advisory checks; gives the count |
+| `read_custom(text, err) -> bool` | reads a custom rule file; false on a fault |
+| `custom_reset()` | drops the custom rules of the run |
 | `reg_find(id) -> i64` | gives the registry index of an ID, or -1 |
 | `list_rules(out)` | writes one line per rule |
 | `format_text(findings, out)` | writes one line per finding |
@@ -75,6 +77,7 @@ fn main() {
 | `-f text\|json` | the output format; text is the default |
 | `-max-depth N` | the directory levels the walk reads |
 | `-max-files N` | the files the walk reads |
+| `-rules FILE` | loads custom rules from this file |
 | `-policy FILE` | runs the dependency checks with this policy |
 | `-advisories FILE` | runs the advisory check with this file |
 | `-quiet` | prints nothing; the exit code stays |
@@ -88,6 +91,32 @@ The exit code is 0 with no finding, 1 with findings and 2 when the scan fails.
 A comment on the line of a finding silences it. `// nosec`, `// noqa` and `// nosemgrep` all work. A list of rule IDs after the word limits the comment to those rules. An alias ID counts as its rule.
 
 A block suppression covers many lines. A comment with `// nosec:start` opens one, and a comment with `// nosec:end` closes it. Every finding between the two markers stays out. A marker with no end reaches the last line of the file.
+
+## Custom rules
+
+A file of custom rules adds rules without a change to the package. The file is JSON:
+
+```json
+{
+  "rules": [
+    { "id": "HOUSE01", "severity": "high", "kind": "ident", "text": "legacy_login",
+      "message": "the legacy login is forbidden" },
+    { "id": "HOUSE02", "severity": "low", "kind": "ident", "text": "debug_mode", "exact": true,
+      "message": "a debug flag sits in the source" }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | the rule ID; an ID that the built-in rules hold is a fault |
+| `severity` | `low`, `medium`, `high` or `critical` |
+| `kind` | `ident` reads identifiers, `string` reads string literals, `comment` reads comments |
+| `text` | what the rule looks for |
+| `exact` | true matches the whole token; false matches a part |
+| `message` | the message of the finding |
+
+A custom rule joins the registry. The filters, the suppressions and the exit code treat it like a built-in rule. A second `-rules` file replaces the first.
 
 ## Rules
 

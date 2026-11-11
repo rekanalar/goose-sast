@@ -1,0 +1,8 @@
+{
+  "rules": [
+    { "id": "HOUSE01", "severity": "high", "kind": "ident", "text": "legacy_login",
+      "message": "the legacy login is forbidden; use the sso module" },
+    { "id": "HOUSE02", "severity": "low", "kind": "ident", "text": "debug_mode", "exact": true,
+      "message": "a debug flag sits in the source" }
+  ]
+}

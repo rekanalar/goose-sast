@@ -1,0 +1,8 @@
+{
+  "rules": [
+    { "id": "CO001", "severity": "medium", "kind": "ident", "text": "eval", "message": "an eval call of the house rule" },
+    { "id": "CO002", "severity": "low", "kind": "string", "text": "TODO", "message": "a todo in a string" },
+    { "id": "CO003", "severity": "low", "kind": "comment", "text": "FIXME", "message": "a fixme in a comment", "exact": false },
+    { "id": "CO004", "severity": "high", "kind": "ident", "text": "run_cmd", "exact": true, "message": "the forbidden call" }
+  ]
+}

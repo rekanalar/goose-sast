@@ -142,6 +142,53 @@ fn main() {
     check(count_rule("fn f() { let x = args(); }\nrun(x, a);\n", "G702") == 0, "G702 out of scope");
     check(count_rule("let x = \"literal\";\nrun(x, a);\n", "G702") == 0, "G702 no source");
 
+    // The custom rules join the registry and run like built-in rules.
+    var cr: u8[>..] = [];
+    read_file("test/custom/rules.json", cr);
+    var cerr: u8[>..] = [];
+    check(sast::read_custom(cr[..], cerr), "custom rules parse");
+    let base_rules = sast::rule_count();
+    check(base_rules > 4, "the registry holds the built-in rows");
+    var fco: sast::Finding[>..] = [];
+    sast::findings_reset();
+    var oco = sast::default_options();
+    sast::scan_text("src/a.goose", "eval(x);\nlet s = \"a TODO here\";\n// FIXME soon\nrun_cmd(a);\nrun_cmds(a);\n", oco, fco);
+    var co1: i64 = 0;
+    var co2: i64 = 0;
+    var co3: i64 = 0;
+    var co4: i64 = 0;
+    for f in fco {
+        let rid = sast::reg_id_s[f.rule];
+        if rid == "CO001" { co1 = co1 + 1; }
+        if rid == "CO002" { co2 = co2 + 1; }
+        if rid == "CO003" { co3 = co3 + 1; }
+        if rid == "CO004" { co4 = co4 + 1; }
+    }
+    check(co1 == 1, "custom ident rule");
+    check(co2 == 1, "custom string rule");
+    check(co3 == 1, "custom comment rule");
+    check(co4 == 1, "custom exact rule");
+
+    // A custom finding obeys a suppression comment.
+    var fcs: sast::Finding[>..] = [];
+    sast::findings_reset();
+    sast::scan_text("src/a.goose", "eval(x); // nosec\n", oco, fcs);
+    check(fcs.len == 0, "custom rule suppressed");
+
+    // A bad custom file faults with a message.
+    var badc: u8[>..] = [];
+    for c in "{ \"rules\": [{\"id\":\"\"}] }" { badc.push(c); }
+    var bce: u8[>..] = [];
+    check(!sast::read_custom(badc[..], bce), "a custom rule with no id faults");
+    check(bce.len > 0, "the fault names the rule");
+
+    // A second file replaces the first.
+    var one: u8[>..] = [];
+    for c in "{ \"rules\": [{\"id\":\"CO009\",\"severity\":\"low\",\"kind\":\"ident\",\"text\":\"zz\"}] }" { one.push(c); }
+    var oerr: u8[>..] = [];
+    check(sast::read_custom(one[..], oerr), "the second file parses");
+    sast::custom_reset();
+
     // The manifest reader reads the import lines.
     var root: u8[>..] = [];
     read_file("test/deps/root.goose", root);

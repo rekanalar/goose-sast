@@ -57,6 +57,7 @@ fn usage() {
     write_stderr("  -f text|json                         the output format (default text)\n");
     write_stderr("  -max-depth N                        the directory levels the walk reads\n");
     write_stderr("  -max-files N                        the files the walk reads\n");
+    write_stderr("  -rules FILE                         load custom rules from this file\n");
     write_stderr("  -policy FILE                        run the dependency checks with this policy\n");
     write_stderr("  -advisories FILE                    run the advisory check with this file\n");
     write_stderr("  -quiet                               no output but the exit code\n");
@@ -103,6 +104,8 @@ fn main() {
     var policy_path: u8[>..] = [];
     var adv_path: u8[>..] = [];
     var have_policy = false;
+    var rules_path: u8[>..] = [];
+    var have_rules = false;
     var have_adv = false;
     var target_count: i64 = 0;
     var bad: u8[>..] = [];
@@ -165,6 +168,13 @@ fn main() {
             if n < 0 { die("the flag takes a number"); }
             if a[..] == "-max-depth" { o.max_depth = n; }
             else { o.max_files = n; }
+        } else if a[..] == "-rules" {
+            i = i + 1;
+            if i >= arg_count() { die("the flag needs a value"); }
+            var v: u8[>..] = [];
+            arg(i, v);
+            for b in v { rules_path.push(b); }
+            have_rules = true;
         } else if a[..] == "-policy" || a[..] == "-advisories" {
             i = i + 1;
             if i >= arg_count() { die("the flag needs a value"); }
@@ -207,6 +217,15 @@ fn main() {
     if target_count != 1 {
         usage();
         exit(2);
+    }
+
+    if have_rules {
+        var rules_text: u8[>..] = [];
+        var rerr: u8[>..] = [];
+        if !read_file(rules_path[..], rules_text) {
+            die("cannot read the rules file");
+        }
+        if !sast::read_custom(rules_text[..], rerr) { die(rerr[..]); }
     }
 
     var findings: sast::Finding[>..] = [];

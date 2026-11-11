@@ -116,6 +116,24 @@ jobs:
             grep -q "0 finding(s)" "$L/out.txt"
             grep -q "2 file(s) skipped" "$L/out.txt"
           fi
+          # The custom rules run like built-in rules and obey a
+          # suppression comment.
+          R="$RUNNER_TEMP/rules.json"
+          printf '{ "rules": [ { "id": "HOUSE01", "severity": "high", "kind": "ident", "text": "legacy_login", "message": "the forbidden call" } ] }\n' > "$R"
+          printf 'legacy_login(u, p);\n' > "$RUNNER_TEMP/clean/c.goose"
+          set +e
+          "$RUNNER_TEMP/sast" -rules "$R" "$RUNNER_TEMP/clean" > "$R.out"
+          set -e
+          grep -q "HOUSE01" "$R.out"
+          printf 'legacy_login(u, p); // nosec\n' > "$RUNNER_TEMP/clean/c.goose"
+          "$RUNNER_TEMP/sast" -rules "$R" "$RUNNER_TEMP/clean" | grep -q "0 finding"
+          # A bad rule file is a fault.
+          printf '{ "rules": [ { "id": "G101", "severity": "high", "kind": "ident", "text": "x" } ] }\n' > "$R"
+          set +e
+          "$RUNNER_TEMP/sast" -rules "$R" "$RUNNER_TEMP/clean" 2> /dev/null
+          code=$?
+          set -e
+          test "$code" = 2
           # A bad flag and a bad rule ID end with exit 2.
           set +e
           "$RUNNER_TEMP/sast" -bogus test/rules 2> /dev/null; code=$?
