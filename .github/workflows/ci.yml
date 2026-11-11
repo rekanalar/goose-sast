@@ -99,6 +99,10 @@ jobs:
           "$RUNNER_TEMP/sast" -no-fail -exclude G404,B311 test/rules > out.txt
           if grep -q "G404" out.txt; then echo "exclude kept G404"; exit 1; fi
           "$RUNNER_TEMP/sast" -no-fail -f json test/rules | grep -q '"rule":"G101"'
+          # The SARIF form writes one JSON object with the rule rows
+          # and the results. The JSON module of Python reads it back.
+          "$RUNNER_TEMP/sast" -no-fail -f sarif test/rules > sarif.json
+          python3 -c "import json;d=json.load(open('sarif.json'));r=d['runs'][0];assert d['version']=='2.1.0';assert len(r['results'])>0;assert any(x['ruleId']=='G101' for x in r['results'])"
           # A symbolic link stays out of the walk. The loop cannot make
           # the walk read one file twice, and the link outside the tree
           # is not read. Windows cannot create a link from its shell.

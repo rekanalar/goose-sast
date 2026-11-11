@@ -145,15 +145,38 @@ fn rule_proc(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     }
 }
 
-// rule_wildcard runs B609: a literal `*` argument to any call.
+// enclosing_call gives the name of the call that holds the token i in
+// its argument list. The name sits before the literal, on the same
+// line. It gives an empty text when no call holds the token.
+fn enclosing_call(src: const u8[:], i: i64) -> const u8[:] {
+    var k = i - 1;
+    while k >= 0 && tk_line[k] == tk_line[i] && i - k <= 16 {
+        if tk_kind[k] == TK_IDENT && k + 1 < tk_count
+            && tk_kind[k + 1] == TK_OTHER && tok_of(src, k + 1) == "(" {
+            return tok_of(src, k);
+        }
+        if tk_kind[k] == TK_OTHER && (tok_of(src, k) == ";"
+            || tok_of(src, k) == "}") {
+            return "";
+        }
+        k = k - 1;
+    }
+    return "";
+}
+
+// rule_wildcard runs B609: a literal `*` argument to a process call.
+// The wildcard expands only where a command runs.
 fn rule_wildcard(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_STRING && lit_body(tok_of(src, i)) == "*"
             && i > 0 && tk_kind[i - 1] == TK_OTHER
             && (tok_of(src, i - 1) == "(" || tok_of(src, i - 1) == ",") {
-            rep(out, 20, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                "a wildcard may expand in a command");
+            let call = enclosing_call(src, i);
+            if is_proc_call(call) {
+                rep(out, 20, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
+                    "a wildcard may expand in a command");
+            }
         }
         i = i + 1;
     }

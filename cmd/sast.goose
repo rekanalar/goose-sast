@@ -54,7 +54,7 @@ fn usage() {
     write_stderr("  -exclude ID[,ID]                     the rule IDs to leave out\n");
     write_stderr("  -include ID[,ID]                     only these rule IDs\n");
     write_stderr("  -exclude-path NAME[,NAME]            path parts to skip in the walk\n");
-    write_stderr("  -f text|json                         the output format (default text)\n");
+    write_stderr("  -f text|json|sarif                         the output format (default text)\n");
     write_stderr("  -max-depth N                        the directory levels the walk reads\n");
     write_stderr("  -max-files N                        the files the walk reads\n");
     write_stderr("  -rules FILE                         load custom rules from this file\n");
@@ -101,6 +101,7 @@ fn main() {
     var no_fail = false;
     var list_rules = false;
     var json_out = false;
+    var sarif_out = false;
     var policy_path: u8[>..] = [];
     var adv_path: u8[>..] = [];
     var have_policy = false;
@@ -157,8 +158,9 @@ fn main() {
             var v: u8[>..] = [];
             arg(i, v);
             if v[..] == "json" { json_out = true; }
+            else if v[..] == "sarif" { sarif_out = true; }
             else if v[..] == "text" { json_out = false; }
-            else { die("the format is text or json"); }
+            else { die("the format is text, json or sarif"); }
         } else if a[..] == "-max-depth" || a[..] == "-max-files" {
             i = i + 1;
             if i >= arg_count() { die("the flag needs a value"); }
@@ -286,7 +288,9 @@ fn main() {
 
     if !quiet {
         var out: u8[>..] = [];
-        if json_out {
+        if sarif_out {
+            sast::format_sarif(findings[..], out);
+        } else if json_out {
             sast::format_json(findings[..], scanned, skipped, out);
         } else {
             sast::format_text(findings[..], out);

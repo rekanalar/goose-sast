@@ -4,6 +4,7 @@
 namespace sast;
 
 import os;
+import std;
 
 // ends_with reports whether s ends with the suffix.
 fn ends_with(s: const u8[:], suffix: const u8[:]) -> bool {
@@ -11,46 +12,164 @@ fn ends_with(s: const u8[:], suffix: const u8[:]) -> bool {
     return s[s.len - suffix.len..s.len] == suffix;
 }
 
-// The block suppressions of the file. Each range holds a first line
-// and a last line.
+// The block suppressions of the file. Each range holds a first line, a
+// last line and the rule it silences. A rule of -1 silences every rule.
 var supp_from: i64[>..] = [];
 var supp_to: i64[>..] = [];
+var supp_rule: i64[>..] = [];
 
-// suppress_ranges reads the block suppression comments of the source. A
-// comment with `nosec:start` opens a range, and a comment with
-// `nosec:end` closes it. A range with no end reaches the end of the
-// file.
+// The ranges that a disable opened and no enable closed yet.
+var supp_open_from: i64[>..] = [];
+var supp_open_rule: i64[>..] = [];
+
+// supp_close closes one open range at the line.
+fn supp_close(at: i64, line: i64) {
+    supp_from.push(supp_open_from[at]);
+    supp_to.push(line);
+    supp_rule.push(supp_open_rule[at]);
+    remove_at(supp_open_from, at);
+    remove_at(supp_open_rule, at);
+}
+
+// supp_read_ids reads the rule IDs of a directive. The IDs sit after
+// the word, separated by commas or spaces. An ID that no rule carries
+// stays out. It gives -1 when the comment holds tokens but no known
+// ID, so the caller opens no range. It gives 0 when no token follows
+// the word, so the caller opens every rule.
+fn supp_read_ids(text: const u8[:], at: i64, line: i64) -> i64 {
+    var s = at;
+    var read: i64 = 0;
+    var tokens: i64 = 0;
+    while s < text.len {
+        while s < text.len && (text[s] == 32 || text[s] == 44) { s = s + 1; }
+        var e = s;
+        while e < text.len && text[e] != 32 && text[e] != 44 { e = e + 1; }
+        if e > s {
+            tokens = tokens + 1;
+            let idx = reg_find(text[s..e]);
+            if idx >= 0 {
+                supp_open_from.push(line);
+                supp_open_rule.push(idx);
+                read = read + 1;
+            }
+        }
+        s = e;
+    }
+    if read == 0 && tokens > 0 { return -1; }
+    return read;
+}
+
+// suppress_ranges reads the block suppression comments of the source.
+// A comment with `nosec:start` or `goose-sast:disable` opens a range,
+// and a comment with `nosec:end` or `goose-sast:enable` closes it. A
+// directive may name rules, and then the range silences those rules
+// only. A range with no end reaches the end of the file.
 fn suppress_ranges(src: const u8[:]) {
     supp_from.resize(0, 0);
     supp_to.resize(0, 0);
-    var open: i64 = -1;
+    supp_rule.resize(0, 0);
+    supp_open_from.resize(0, 0);
+    supp_open_rule.resize(0, 0);
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_COMMENT {
             let text = tok_of(src, i);
-            if has_word(text, "nosec:start") {
-                open = tk_line[i];
-            } else if has_word(text, "nosec:end") {
-                if open >= 0 {
-                    supp_from.push(open);
-                    supp_to.push(tk_line[i]);
-                    open = -1;
+            let line = tk_line[i];
+            var all_open = false;
+            var all_close = false;
+            var ids_at: i64 = -1;
+            if has_word(text, "nosec:start") || has_word(text, "goose-sast:disable") {
+                // The IDs sit after the word, when the comment holds
+                // any.
+                var k: i64 = 0;
+                while k < text.len {
+                    if k + 5 <= text.len && text[k..k + 5] == "start"
+                        && has_word(text, "nosec:start") {
+                        ids_at = k + 5;
+                        all_open = true;
+                        break;
+                    }
+                    if k + 7 <= text.len && text[k..k + 7] == "disable"
+                        && has_word(text, "goose-sast:disable") {
+                        ids_at = k + 7;
+                        all_open = true;
+                        break;
+                    }
+                    k = k + 1;
+                }
+            } else if has_word(text, "nosec:end") || has_word(text, "goose-sast:enable") {
+                all_close = true;
+            }
+            if all_open {
+                // A range with no list silences every rule. A list of
+                // unknown IDs gives -1 and silences nothing.
+                if ids_at < 0 || supp_read_ids(text, ids_at, line) == 0 {
+                    supp_open_from.push(line);
+                    supp_open_rule.push(-1);
+                }
+            } else if all_close {
+                // An enable with a list closes the ranges of those
+                // rules; an enable with no list closes every range.
+                var k: i64 = 0;
+                while k < supp_open_from.len {
+                    if has_word(text, "enable") {
+                        // The IDs after the word, if any.
+                        var m: i64 = 0;
+                        var named = false;
+                        while m + 6 <= text.len {
+                            if text[m..m + 6] == "enable" {
+                                m = m + 6;
+                                break;
+                            }
+                            m = m + 1;
+                        }
+                        while m < text.len && (text[m] == 32 || text[m] == 58) { m = m + 1; }
+                        if m < text.len {
+                            let rid = supp_open_rule[k];
+                            // An all-rule range closes on any named
+                            // enable only when the list holds it? No:
+                            // a named enable closes named ranges; the
+                            // all-rule range stays open.
+                            if rid < 0 { k = k + 1; continue; }
+                            let want = reg_id_s[rid];
+                            var e = m;
+                            var held = false;
+                            while e < text.len {
+                                while e < text.len && (text[e] == 32 || text[e] == 44) { e = e + 1; }
+                                var f = e;
+                                while f < text.len && text[f] != 32 && text[f] != 44 { f = f + 1; }
+                                if f > e && text[e..f] == want { held = true; break; }
+                                e = f;
+                            }
+                            if !held { k = k + 1; continue; }
+                            named = true;
+                        }
+                    }
+                    supp_close(k, line);
+                    if !has_word(text, "enable") { break; }
                 }
             }
         }
         i = i + 1;
     }
-    if open >= 0 {
-        supp_from.push(open);
-        supp_to.push(tk_line[tk_count - 1]);
+    // A range with no end reaches the end of the file.
+    var k: i64 = 0;
+    var last: i64 = 0;
+    if tk_count > 0 { last = tk_line[tk_count - 1]; }
+    while k < supp_open_from.len {
+        supp_close(k, last);
     }
 }
 
-// in_block reports whether the line sits in a block suppression.
-fn in_block(line: i64) -> bool {
+// in_block reports whether the rule sits in a block suppression of the
+// line. A range with a rule of -1 silences every rule.
+fn in_block(line: i64, rule_idx: i64) -> bool {
     var i: i64 = 0;
     while i < supp_from.len {
-        if line >= supp_from[i] && line <= supp_to[i] { return true; }
+        if line >= supp_from[i] && line <= supp_to[i]
+            && (supp_rule[i] < 0 || supp_rule[i] == rule_idx) {
+            return true;
+        }
         i = i + 1;
     }
     return false;
@@ -60,8 +179,8 @@ fn in_block(line: i64) -> bool {
 // comment that names the rule or names none. The comment holds `nosec`,
 // `noqa` or `nosemgrep`, then an optional list of rule IDs. A block
 // suppression covers the line too.
-fn suppressed(src: const u8[:], line: i64, rule_id: const u8[:], alias: const u8[:]) -> bool {
-    if in_block(line) { return true; }
+fn suppressed(src: const u8[:], line: i64, rule_id: const u8[:], alias: const u8[:], rule_idx: i64) -> bool {
+    if in_block(line, rule_idx) { return true; }
     let c = tok_line_comment(line);
     if c < 0 { return false; }
     let text = tok_of(src, c);
@@ -158,7 +277,7 @@ fn scan_text(path: const u8[:], src: const u8[:], o: Options, out: Finding[>..]&
     for f in raw {
         let id = reg_id_s[f.rule];
         let al = reg_alias_s[f.rule];
-        if suppressed(src, f.line, id, al) {
+        if suppressed(src, f.line, id, al, f.rule) {
             continue;
         }
         if keep(o, f.rule, f.sev, f.conf) {
@@ -199,6 +318,36 @@ fn q_add(path: const u8[:], depth: i64) {
     q_depth.push(depth);
 }
 
+// The directories the walk entered, as byte paths. A directory the
+// list holds is a cycle, and the walk skips it.
+var vis_buf: u8[>..] = [];
+var vis_at: i64[>..] = [];
+var vis_end: i64[>..] = [];
+
+// vis_reset empties the visited list.
+fn vis_reset() {
+    vis_buf.resize(0, 0);
+    vis_at.resize(0, 0);
+    vis_end.resize(0, 0);
+}
+
+// vis_seen reports whether the walk already entered the path.
+fn vis_seen(path: const u8[:]) -> bool {
+    var i: i64 = 0;
+    while i < vis_at.len {
+        if vis_buf[vis_at[i]..vis_end[i]] == path { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// vis_put records that the walk entered the path.
+fn vis_put(path: const u8[:]) {
+    vis_at.push(vis_buf.len);
+    for b in path { vis_buf.push(b); }
+    vis_end.push(vis_buf.len);
+}
+
 // scan_walk walks the queue breadth first. It reads each .goose file
 // once, follows no link and stops at the depth bound. It counts the
 // files it scanned in scanned and the entries it skipped in skipped.
@@ -210,6 +359,9 @@ fn scan_walk(o: Options, out: Finding[>..]&, scanned: i64&, skipped: i64&) {
         for b in q_buf[q_at[head]..q_end[head]] { dir.push(b); }
         head = head + 1;
         if depth > o.max_depth { skipped = skipped + 1; continue; }
+        // A directory the walk entered twice is a cycle.
+        if vis_seen(dir[..]) { skipped = skipped + 1; continue; }
+        vis_put(dir[..]);
         var listing: u8[>..] = [];
         if !list_dir(dir[..], listing) { skipped = skipped + 1; continue; }
         var start: i64 = 0;
@@ -256,6 +408,7 @@ fn scan_dir(dir: const u8[:], o: Options, out: Finding[>..]&) -> i64, i64 {
     q_end.resize(0, 0);
     q_depth.resize(0, 0);
     q_buf.resize(0, 0);
+    vis_reset();
     q_add(dir, 0);
     scan_walk(o, out, scanned, skipped);
     sort_findings(out);

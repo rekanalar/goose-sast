@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.5.0";
+import sast from "rekanalar/goose-sast@v0.6.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.5.0";
+import sast from "rekanalar/goose-sast@v0.6.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -64,6 +64,7 @@ fn main() {
 | `format_text(findings, out)` | writes one line per finding |
 | `format_json(findings, scanned, skipped, out)` | writes one JSON object: the findings, the totals per severity and the file counts |
 | `format_summary(findings, scanned, skipped, out)` | writes the count line |
+| `format_sarif(findings, out)` | writes one SARIF 2.1.0 object with the rule rows and the results |
 
 ## Command
 
@@ -74,7 +75,7 @@ fn main() {
 | `-exclude ID,ID` | leaves rules out |
 | `-include ID,ID` | keeps only these rules |
 | `-exclude-path NAME,NAME` | skips path parts in the walk |
-| `-f text\|json` | the output format; text is the default |
+| `-f text\|json\|sarif` | the output format; text is the default |
 | `-max-depth N` | the directory levels the walk reads |
 | `-max-files N` | the files the walk reads |
 | `-rules FILE` | loads custom rules from this file |
@@ -90,7 +91,9 @@ The exit code is 0 with no finding, 1 with findings and 2 when the scan fails.
 
 A comment on the line of a finding silences it. `// nosec`, `// noqa` and `// nosemgrep` all work. A list of rule IDs after the word limits the comment to those rules. An alias ID counts as its rule.
 
-A block suppression covers many lines. A comment with `// nosec:start` opens one, and a comment with `// nosec:end` closes it. Every finding between the two markers stays out. A marker with no end reaches the last line of the file.
+A block suppression covers many lines. A comment with `// nosec:start` opens one, and a comment with `// nosec:end` closes it. `// goose-sast:disable` and `// goose-sast:enable` are the same thing under other names. A marker with no end reaches the last line of the file.
+
+A directive with a rule list covers those rules only. `// goose-sast:disable G101, G102` silences the two rules until the matching enable. Two disables of one rule with one enable close the first open range. A list of IDs that no rule carries opens no range and the run says nothing about it.
 
 ## Custom rules
 
@@ -157,7 +160,7 @@ The dependency checks report under their own IDs.
 
 - The rules read the source as text. A name that a program builds at run time stays invisible.
 - The tokenizer holds strings, comments, identifiers and numbers. It does not parse the language, so a rule that needs types does not exist.
-- A rule that matches on a name alone, such as G401, matches a local function of that name too. The linter cannot tell the two apart. Read such a finding before you act on it.
+- G401 and G404 read one token before and one token after a name. They report a call form only. A call through a function value or an alias stays invisible.
 - The scope rules use the brace depth. A name of a deeper scope hides the name of an outer scope. A name of a sibling scope still matches.
 - Most rules of the references have no Goose surface. The standard library holds no TLS, HTTP, SQL, archive or template code. The package leaves those rules out.
 - The advisory file holds the advisories of Rust packages. No Goose advisory database exists. The package reads the RustSec file format and reports the hits of the package names that match.
@@ -168,7 +171,8 @@ The dependency checks report under their own IDs.
 
 - The scan bounds one file at 16 MiB, the walk at 4096 files and 64 directory levels. The `-max-files` and `-max-depth` flags lower both bounds.
 - The link check is one C call with one argument. A path longer than 4096 bytes counts as a link and stays out of the walk.
-- The walk skips a symbolic link and any other reparse point. A loop of links cannot make the walk read one file twice. A link cannot point the walk outside the tree. A path that the check cannot read counts as a link.
+- The walk skips a symbolic link and any other reparse point. A link cannot point the walk outside the tree. A path that the check cannot read counts as a link.
+- The walk holds the byte path of every directory it enters and skips a directory it has seen. A bind-mount loop costs one visit. A directory reached by two different paths counts twice.
 - The output writes each byte outside printable ASCII as `\xNN`. A hostile path cannot inject a control sequence into a terminal.
 - A file that the scan cannot read counts as skipped. The summary line shows the count, so a skipped file never hides.
 - The scan runs no code from the files it reads.

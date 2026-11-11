@@ -33,8 +33,10 @@ fn count_rule_with(src: const u8[:], id: const u8[:], o: sast::Options) -> i64 {
 fn main() {
     check(count_rule("let password = \"hunter2hunter2\";\n", "G101") == 1, "G101 literal");
     check(count_rule("let name = \"hello\";\n", "G101") == 0, "G101 clean");
-    check(count_rule("let a = \"0.0.0.0\";\n", "G102") == 1, "G102 bind");
+    check(count_rule("listen(\"0.0.0.0\", p);\n", "G102") == 1, "G102 bind");
+    check(count_rule("let a = \"0.0.0.0\";\n", "G102") == 0, "G102 no bind call");
     check(count_rule("let a = \"127.0.0.1\";\n", "G102") == 0, "G102 loopback");
+    check(count_rule("put(out, \":86:\");\n", "G102") == 0, "G102 port tag text");
     check(count_rule("let a = \"select * from t where a=\" + x;\n", "G202") == 1, "G202 sql");
     check(count_rule("let a = \"select \" + str(x);\n", "G201") == 1, "G201 format");
     check(count_rule("let h = \"<b>\" + name;\n", "G203") == 1, "G203 html");
@@ -47,6 +49,12 @@ fn main() {
     check(count_rule("f(0o777);\n", "G302") == 1, "G302 wide mode");
     check(count_rule("write_file(\"a\", d, 0o644);\n", "G306") == 1, "G306 write mode");
     check(count_rule("let h = md5(x);\n", "G401") == 1, "G401 weak hash");
+    check(count_rule("fn md5(x) { }\n", "G401") == 0, "G401 definition holds");
+    check(count_rule("let sha1 = 5;\n", "G401") == 0, "G401 plain name holds");
+    check(count_rule("fn rand_int(n) { }\n", "G404") == 0, "G404 definition holds");
+    check(count_rule("let shuffle = 1;\n", "G404") == 0, "G404 plain name holds");
+    check(count_rule("run(\"*\", a);\n", "B609") == 1, "B609 process call");
+    check(count_rule("out.push(\"*\");\n", "B609") == 0, "B609 no process call");
     check(count_rule("let r = rand_int(5);\n", "G404") == 1, "G404 weak random");
     check(count_rule("let r = rng { 42 };\n", "G404") == 1, "G404 constant seed");
     check(count_rule("import m from \"a/goose-md5@v1.0.0\";\n", "G501") == 1, "G501 import");
@@ -58,7 +66,8 @@ fn main() {
     check(count_rule("let w = wait(h, 0);\n", "B113") == 1, "B113 zero wait");
     check(count_rule("run(\"tar\", \"*\");\n", "B609") == 1, "B609 wildcard");
     check(count_rule("let a = \"\xE2\x80\xAE\";\n", "G116") == 1, "G116 bidi");
-    check(count_rule("let a = \"/\";\n", "G111") == 1, "G111 root");
+    check(count_rule("read_file(\"/\", out);\n", "G111") == 1, "G111 root");
+    check(count_rule("tmp.push('/');\n", "G111") == 0, "G111 separator");
 
     check(count_rule("write_file(\"a\", d);\n", "G104") == 1, "G104 dropped result");
     check(count_rule("let ok = write_file(\"a\", d);\n", "G104") == 0, "G104 bound result");
@@ -75,22 +84,22 @@ fn main() {
     check(sast::reg_find("XXXX") < 0, "unknown ID");
 
     // Suppression comments.
-    check(count_rule("let a = \"0.0.0.0\"; // nosec\n", "G102") == 0, "nosec all");
-    check(count_rule("let a = \"0.0.0.0\"; // nosec G102\n", "G102") == 0, "nosec named");
-    check(count_rule("let a = \"0.0.0.0\"; // nosec G999\n", "G102") == 1, "nosec other rule");
-    check(count_rule("let a = \"0.0.0.0\"; // noqa: B104\n", "G102") == 0, "noqa alias");
-    check(count_rule("let a = \"0.0.0.0\"; // nosemgrep\n", "G102") == 0, "nosemgrep");
+    check(count_rule("listen(\"0.0.0.0\", p); // nosec\n", "G102") == 0, "nosec all");
+    check(count_rule("listen(\"0.0.0.0\", p); // nosec G102\n", "G102") == 0, "nosec named");
+    check(count_rule("listen(\"0.0.0.0\", p); // nosec G999\n", "G102") == 1, "nosec other rule");
+    check(count_rule("listen(\"0.0.0.0\", p); // noqa: B104\n", "G102") == 0, "noqa alias");
+    check(count_rule("listen(\"0.0.0.0\", p); // nosemgrep\n", "G102") == 0, "nosemgrep");
 
     // Filters.
     var o = sast::default_options();
     o.min_severity = sast::SEV_HIGH;
-    check(count_rule_with("let a = \"0.0.0.0\";\n", "G102", o) == 0, "severity floor");
+    check(count_rule_with("listen(\"0.0.0.0\", p);\n", "G102", o) == 0, "severity floor");
     o = sast::default_options();
     sast::opt_exclude("B104");
-    check(count_rule_with("let a = \"0.0.0.0\";\n", "G102", o) == 0, "exclude by alias");
+    check(count_rule_with("listen(\"0.0.0.0\", p);\n", "G102", o) == 0, "exclude by alias");
     o = sast::default_options();
     sast::opt_include("G404");
-    check(count_rule_with("let a = \"0.0.0.0\";\n", "G102", o) == 0, "include other");
+    check(count_rule_with("listen(\"0.0.0.0\", p);\n", "G102", o) == 0, "include other");
     o = sast::default_options();
 
     // A string holding a rule trigger is no finding on its own.
@@ -99,7 +108,7 @@ fn main() {
     // Hostile bytes: a path with a control byte is escaped.
     var fs: sast::Finding[>..] = [];
     sast::findings_reset();
-    sast::scan_text("a\x1b[31m.goose", "let a = \"0.0.0.0\";\n", o, fs);
+    sast::scan_text("a\x1b[31m.goose", "listen(\"0.0.0.0\", p);\n", o, fs);
     var out: u8[>..] = [];
     sast::format_text(fs[..], out);
     var raw = false;
@@ -120,10 +129,113 @@ fn main() {
     check(rows == sast::rule_count(), "list has one line per rule");
 
     // A block suppression covers the lines between the markers.
-    check(count_rule("// nosec:start\nlet a = \"0.0.0.0\";\n// nosec:end\n", "G102") == 0, "block suppression");
-    check(count_rule("// nosec:start\nlet a = \"0.0.0.0\";\n", "G102") == 0, "block without an end");
-    check(count_rule("// nosec:start\nlet a = \"0.0.0.0\";\n// nosec:end\nlet b = \"0.0.0.0\";\n", "G102") == 1, "block ends");
-    check(count_rule("// nosec:start\nlet a = \"0.0.0.0\";\n// nosec:end\nlet b = \"0.0.0.0\";\n// nosec\n", "G102") == 1, "line after a block");
+    check(count_rule("// nosec:start\nlisten(\"0.0.0.0\", p);\n// nosec:end\n", "G102") == 0, "block suppression");
+    check(count_rule("// nosec:start\nlisten(\"0.0.0.0\", p);\n", "G102") == 0, "block without an end");
+    check(count_rule("// nosec:start\nlisten(\"0.0.0.0\", p);\n// nosec:end\nlisten(\"0.0.0.0\", p);\n", "G102") == 1, "block ends");
+    check(count_rule("// nosec:start\nlisten(\"0.0.0.0\", p);\n// nosec:end\nlisten(\"0.0.0.0\", p);\n// nosec\n", "G102") == 1, "line after a block");
+
+    // The rule ranges: a disable of one rule holds that rule only.
+    check(count_rule("// goose-sast:disable G101\nlet password = \"hunter2hunter2\";\nlisten(\"0.0.0.0\", p);\n// goose-sast:enable G101\n", "G101") == 0, "disable holds the rule");
+    check(count_rule("// goose-sast:disable G101\nlet password = \"hunter2hunter2\";\nlisten(\"0.0.0.0\", p);\n// goose-sast:enable G101\n", "G102") == 1, "disable holds one rule only");
+    check(count_rule("// goose-sast:disable\nlisten(\"0.0.0.0\", p);\n// goose-sast:enable\nlisten(\"0.0.0.0\", p);\n", "G102") == 1, "a disable with no list holds every rule");
+    check(count_rule("// goose-sast:disable G101\nlet password = \"hunter2hunter2\";\n", "G101") == 0, "a disable with no enable reaches the end");
+    check(count_rule("// goose-sast:disable G101\n// goose-sast:disable G102\nlisten(\"0.0.0.0\", p);\n// goose-sast:enable G102\nlisten(\"0.0.0.0\", p);\n", "G102") == 1, "one enable closes one range");
+    check(count_rule("// goose-sast:disable BAD\nlisten(\"0.0.0.0\", p);\n", "G102") == 1, "an unknown ID opens no range");
+    // nosec:start takes a rule list too.
+    check(count_rule("// nosec:start G102\nlisten(\"0.0.0.0\", p);\n// nosec:end\nlet password = \"hunter2hunter2\";\n", "G102") == 0, "nosec start holds one rule");
+    check(count_rule("// nosec:start G102\nlisten(\"0.0.0.0\", p);\n// nosec:end\nlet password = \"hunter2hunter2\";\n", "G101") == 1, "nosec start holds one rule only");
+
+    // The SARIF form: it parses and holds the level and the region.
+    var sf: sast::Finding[>..] = [];
+    sast::findings_reset();
+    sast::scan_text("a\x1b.goose", "let h = md5(x);\nlisten(\"0.0.0.0\", p);\n", o, sf);
+    var so: u8[>..] = [];
+    let want_line = sf[0].line;
+    let want_col = sf[0].col;
+    sast::format_sarif(sf[..], so);
+    var raws = false;
+    for c in so { if c == 27 { raws = true; } }
+    check(!raws, "sarif holds no control byte");
+    var sdoc: json::Node[>..] = [];
+    var sdec: u8[>..] = [];
+    let sroot, serr = json::parse(so[..], sdoc, sdec);
+    check(sroot != null, "sarif parses");
+    if sroot {
+        let version, vok = json::as_string(json::member(sroot, "version"));
+        check(vok && version == "2.1.0", "sarif version");
+        let runs = json::member(sroot, "runs");
+        var nres: i64 = -1;
+        if runs {
+            json::each(runs) { run =>
+                let results = json::member(run, "results");
+                var cnt: i64 = 0;
+                if results {
+                    json::each(results) { r2 =>
+                        let rid, rok = json::as_string(json::member(r2, "ruleId"));
+                        check(rok, "a result holds a rule id");
+                        let lvl, lok = json::as_string(json::member(r2, "level"));
+                        check(lvl == "error" || lvl == "warning" || lvl == "note", "a level of the mapping");
+                        cnt = cnt + 1;
+                    };
+                }
+                nres = cnt;
+            };
+        }
+        check(nres == 2, "one result per finding");
+        // The region of the first result holds the line and the column.
+        var rline: i64 = -1;
+        var rcol: i64 = -1;
+        if runs {
+            json::each(runs) { run =>
+                let results = json::member(run, "results");
+                if results {
+                    json::each(results) { r2 =>
+                        let locs = json::member(r2, "locations");
+                        if locs && rline < 0 {
+                            json::each(locs) { loc =>
+                                let phys = json::member(loc, "physicalLocation");
+                                if phys {
+                                    let reg = json::member(phys, "region");
+                                    if reg {
+                                        let a, aok = json::as_i64(json::member(reg, "startLine"));
+                                        let b, bok = json::as_i64(json::member(reg, "startColumn"));
+                                        if aok && bok && rline < 0 { rline = a; rcol = b; }
+                                    }
+                                }
+                            };
+                        }
+                    };
+                }
+            };
+        }
+        check(rline == want_line && rcol == want_col, "the region holds the line and the column");
+    }
+
+    // A run with no findings holds an empty results list.
+    sast::findings_reset();
+    var ef: sast::Finding[>..] = [];
+    sast::scan_text("clean.goose", "let x = 1;\n", o, ef);
+    check(ef.len == 0, "the clean text has no findings");
+    var eo: u8[>..] = [];
+    sast::format_sarif(ef[..], eo);
+    var edoc: json::Node[>..] = [];
+    var edec: u8[>..] = [];
+    let eroot, eerr = json::parse(eo[..], edoc, edec);
+    check(eroot != null, "the empty sarif parses");
+    if eroot {
+        let runs2 = json::member(eroot, "runs");
+        if runs2 {
+            json::each(runs2) { run =>
+                let results = json::member(run, "results");
+                var cnt2: i64 = -1;
+                if results {
+                    cnt2 = 0;
+                    json::each(results) { r3 => cnt2 = cnt2 + 1; };
+                }
+                check(cnt2 == 0, "the empty sarif holds no result");
+            };
+        }
+    }
 
     // The scope: a secret name and a literal of another block do not
     // match, and a name of a deeper scope shadows an outer name.

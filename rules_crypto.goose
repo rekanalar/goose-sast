@@ -2,12 +2,25 @@
 // blocklist imports.
 namespace sast;
 
-// rule_weakhash runs G401: an identifier that names md5, sha1, md4 or
-// ripemd160.
+// is_call reports whether the token i is a call: the next token is an
+// open bracket and the token before is not the fn keyword. A function
+// that carries the name is no call, so a definition does not report.
+fn is_call(src: const u8[:], i: i64) -> bool {
+    if i + 1 >= tk_count { return false; }
+    if tk_kind[i + 1] != TK_OTHER || tok_of(src, i + 1) != "(" { return false; }
+    if i > 0 && tk_kind[i - 1] == TK_IDENT && tok_of(src, i - 1) == "fn" {
+        return false;
+    }
+    return true;
+}
+
+// rule_weakhash runs G401: a call of md5, sha1, md4 or ripemd160. The
+// rule reads the tokens around the name, so a variable or a function
+// that carries the name does not report.
 fn rule_weakhash(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {
-        if tk_kind[i] == TK_IDENT {
+        if tk_kind[i] == TK_IDENT && is_call(src, i) {
             let name = tok_of(src, i);
             if name == "md5" || name == "sha1" || name == "md4"
                 || name == "ripemd160" || name == "Md5" || name == "Sha1" {
@@ -26,8 +39,8 @@ fn rule_weakrand(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     while i < tk_count {
         if tk_kind[i] == TK_IDENT {
             let name = tok_of(src, i);
-            if name == "rand_u64" || name == "rand_int" || name == "rand_flt"
-                || name == "shuffle" {
+            if (name == "rand_u64" || name == "rand_int" || name == "rand_flt"
+                || name == "shuffle") && is_call(src, i) {
                 rep(out, 14, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
                     "a weak random source is in use");
             } else if name == "rng" && i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER

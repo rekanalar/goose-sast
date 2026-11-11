@@ -113,3 +113,48 @@ fn format_json(fs: const Finding[:], scanned: i64, skipped: i64, out: u8[>..]&) 
     out.push(125);
     out.push(10);
 }
+
+// format_sarif writes one SARIF 2.1.0 object. A code scanning service
+// reads it. The level maps from the severity: LOW is note, MEDIUM is
+// warning, HIGH and CRITICAL are error. The version of the package
+// sits in the driver.
+fn format_sarif(fs: const Finding[:], out: u8[>..]&) {
+    reg_ensure();
+    out.append("{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"goose-sast\",\"version\":\"0.6.0\",\"rules\":[");
+    var i: i64 = 0;
+    while i < reg_id_s.len {
+        if i > 0 { out.push(44); }
+        out.append("{\"id\":");
+        json_text(out, reg_id_s[i]);
+        out.append(",\"shortDescription\":{\"text\":");
+        json_text(out, reg_msg_s[i]);
+        out.append("}}");
+        i = i + 1;
+    }
+    out.append("]}},\"results\":[");
+    i = 0;
+    while i < fs.len {
+        let f = fs[i];
+        if i > 0 { out.push(44); }
+        out.append("{\"ruleId\":");
+        json_text(out, reg_id_s[f.rule]);
+        out.append(",\"level\":");
+        // The level maps from the severity.
+        var lvl: const u8[:] = "warning";
+        if f.sev <= SEV_LOW { lvl = "note"; }
+        else if f.sev >= SEV_HIGH { lvl = "error"; }
+        json_text(out, lvl);
+        out.append(",\"message\":{\"text\":");
+        json_text(out, msg_of(f));
+        out.append("},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":");
+        json_text(out, path_of(f.file));
+        out.append("},\"region\":{\"startLine\":");
+        json::format_int(out, f.line);
+        out.append(",\"startColumn\":");
+        json::format_int(out, f.col);
+        out.append("}}}]}");
+        i = i + 1;
+    }
+    out.append("]}]}");
+    out.push(10);
+}

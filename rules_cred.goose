@@ -88,12 +88,18 @@ fn rule_bind(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     while i < tk_count {
         if tk_kind[i] == TK_STRING {
             let lit = tok_of(src, i);
-            let body = lit[1..lit.len - 1];
-            if lit.len > 1 && (body == "0.0.0.0" || body == "::"
-                || body == "[::]" || (body.len > 1 && body[0] == 58
-                && body[1] >= 48 && body[1] <= 57)) {
-                rep(out, 1, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                    "the program binds to all interfaces");
+            // A string that never closed holds its quote only.
+            if lit.len > 1 {
+                let body = lit[1..lit.len - 1];
+                // The literal must sit in the argument list of a call.
+                // A comparison or a build step does not bind.
+                var in_call = i > 0 && tk_kind[i - 1] == TK_OTHER
+                    && (tok_of(src, i - 1) == "(" || tok_of(src, i - 1) == ",");
+                if in_call && (body == "0.0.0.0" || body == "::"
+                    || body == "[::]") {
+                    rep(out, 1, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
+                        "the program binds to all interfaces");
+                }
             }
         }
         i = i + 1;
@@ -109,6 +115,27 @@ fn is_path_call(name: const u8[:]) -> bool {
         || name == "is_dir" || name == "write_file_atomic";
 }
 
+// in_path_call reports whether the token i sits in the argument list
+// of a file call. The call name sits on the same line, before the
+// literal, and holds an open bracket between the name and the
+// literal.
+fn in_path_call(src: const u8[:], i: i64) -> bool {
+    var k = i - 1;
+    while k >= 0 && tk_line[k] == tk_line[i] && i - k <= 16 {
+        if tk_kind[k] == TK_IDENT && is_path_call(tok_of(src, k))
+            && k + 1 < tk_count && tk_kind[k + 1] == TK_OTHER
+            && tok_of(src, k + 1) == "(" {
+            return true;
+        }
+        if tk_kind[k] == TK_OTHER && (tok_of(src, k) == ";"
+            || tok_of(src, k) == "}") {
+            return false;
+        }
+        k = k - 1;
+    }
+    return false;
+}
+
 // rule_paths runs G303, G304 and G111: the temp paths, the variable
 // paths of the file calls, and the root path literal.
 fn rule_paths(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
@@ -118,12 +145,16 @@ fn rule_paths(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
             let lit = tok_of(src, i);
             if lit.len > 1 {
                 let body = lit[1..lit.len - 1];
-                if body == "/" {
-                    rep(out, 15, file_idx, tk_line[i],
-                        tok_col_of(src, tk_start[i]), "the path is the root directory");
-                } else if has_word(body, "/tmp/") || has_word(body, "/var/tmp/") {
-                    rep(out, 10, file_idx, tk_line[i],
-                        tok_col_of(src, tk_start[i]), "a temp path is predictable");
+                // The literal must sit in the argument list of a file
+                // call. A separator push or a format call does not.
+                if in_path_call(src, i) {
+                    if body == "/" {
+                        rep(out, 15, file_idx, tk_line[i],
+                            tok_col_of(src, tk_start[i]), "the path is the root directory");
+                    } else if has_word(body, "/tmp/") || has_word(body, "/var/tmp/") {
+                        rep(out, 10, file_idx, tk_line[i],
+                            tok_col_of(src, tk_start[i]), "a temp path is predictable");
+                    }
                 }
             }
         } else if tk_kind[i] == TK_IDENT && i + 1 < tk_count
