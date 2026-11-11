@@ -99,6 +99,23 @@ jobs:
           "$RUNNER_TEMP/sast" -no-fail -exclude G404,B311 test/rules > out.txt
           if grep -q "G404" out.txt; then echo "exclude kept G404"; exit 1; fi
           "$RUNNER_TEMP/sast" -no-fail -f json test/rules | grep -q '"rule":"G101"'
+          # A symbolic link stays out of the walk. The loop cannot make
+          # the walk read one file twice, and the link outside the tree
+          # is not read. Windows cannot create a link from its shell.
+          if [ "${RUNNER_OS:-Linux}" != "Windows" ]; then
+            L="$RUNNER_TEMP/links"
+            rm -rf "$L"
+            mkdir -p "$L/out"
+            printf 'let a = "0.0.0.0";\n' > "$L/out/x.goose"
+            mkdir -p "$L/walk"
+            ln -s "$L/out" "$L/walk/link"
+            ln -s . "$L/walk/loop"
+            set +e
+            "$RUNNER_TEMP/sast" "$L/walk" > "$L/out.txt"
+            set -e
+            grep -q "0 finding(s)" "$L/out.txt"
+            grep -q "2 file(s) skipped" "$L/out.txt"
+          fi
           # A bad flag and a bad rule ID end with exit 2.
           set +e
           "$RUNNER_TEMP/sast" -bogus test/rules 2> /dev/null; code=$?

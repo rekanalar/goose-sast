@@ -9,12 +9,13 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.3.0";
+import sast from "rekanalar/goose-sast@v0.4.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
 The advisory check reads its version ranges through the semver module.
-A program that uses this package declares both.
+A program that uses this package declares both. The package also holds
+a small C part, so a program that uses it needs a C compiler.
 
 Build the command from the package root:
 
@@ -27,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.3.0";
+import sast from "rekanalar/goose-sast@v0.4.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -137,7 +138,8 @@ The dependency checks report under their own IDs.
 ## Security
 
 - The scan bounds one file at 16 MiB, the walk at 4096 files and 64 directory levels. The `-max-files` and `-max-depth` flags lower both bounds.
-- The walk follows symbolic links, because the standard library has no call that tells a link from a directory. A link loop ends at the depth bound. A link that points outside the tree makes the scan read files outside it. Scan only trees that you trust. The `-max-depth` and `-max-files` flags bound the work of a loop, and `-exclude-path` skips a name.
+- The link check is one C call with one argument. A path longer than 4096 bytes counts as a link and stays out of the walk.
+- The walk skips a symbolic link and any other reparse point. A loop of links cannot make the walk read one file twice. A link cannot point the walk outside the tree. A path that the check cannot read counts as a link.
 - The output writes each byte outside printable ASCII as `\xNN`. A hostile path cannot inject a control sequence into a terminal.
 - A file that the scan cannot read counts as skipped. The summary line shows the count, so a skipped file never hides.
 - The scan runs no code from the files it reads.

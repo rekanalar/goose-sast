@@ -222,7 +222,12 @@ fn scan_walk(o: Options, out: Finding[>..]&, scanned: i64&, skipped: i64&) {
                     for b in dir { path.push(b); }
                     if dir.len > 0 && dir[dir.len - 1] != 47 { path.push(47); }
                     for b in name { path.push(b); }
-                    if is_dir(path[..]) {
+                    // A link stays out of the walk, whatever it points
+                    // at. A loop of links cannot make the walk read
+                    // one file twice.
+                    if path_is_link(path[..]) {
+                        skipped = skipped + 1;
+                    } else if is_dir(path[..]) {
                         q_add(path[..], depth + 1);
                     } else if ends_with(name, ".goose") {
                         var src: u8[>..] = [];
