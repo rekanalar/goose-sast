@@ -219,6 +219,8 @@ fn reg_ensure() {
     reg_put("B413", SEV_HIGH, CONF_HIGH, 327, "", "an import of a crypto cipher library is in use");
     reg_put("B414", SEV_LOW, CONF_HIGH, 327, "", "an import of a cryptography module is in use");
     reg_put("G103", SEV_LOW, CONF_HIGH, 242, "", "an extern function calls code outside the type checker");
+    reg_put("G104", SEV_LOW, CONF_MEDIUM, 703, "", "the result of the call is dropped");
+    reg_put("G602", SEV_MEDIUM, CONF_MEDIUM, 118, "", "a fixed array is indexed with a variable");
     reg_put("G702", SEV_HIGH, CONF_MEDIUM, 78, "", "a value from an outside source reaches a process call");
     reg_put("G703", SEV_HIGH, CONF_MEDIUM, 22, "", "a value from an outside source reaches a file path");
     reg_put("BAN", SEV_HIGH, CONF_HIGH, 0, "", "a dependency is banned");

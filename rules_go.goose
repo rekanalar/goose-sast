@@ -185,3 +185,84 @@ fn rule_secretjson(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
         i = i + 1;
     }
 }
+
+// is_bool_call reports whether the name is a call that gives a bool. The
+// file calls and the process calls give one.
+fn is_bool_call(name: const u8[:]) -> bool {
+    return name == "write_file" || name == "append_file"
+        || name == "delete_file" || name == "rename_file"
+        || name == "make_dir" || name == "file_exists"
+        || name == "is_dir" || name == "write_file_atomic";
+}
+
+// rule_dropped runs G104: a call that gives a bool, and whose result
+// nobody reads. The result is dropped when the call sits alone on its
+// statement.
+fn rule_dropped(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let idx = reg_find("G104");
+    var i: i64 = 0;
+    while i < tk_count {
+        if tk_kind[i] == TK_IDENT && is_bool_call(tok_of(src, i))
+            && i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER
+            && tok_of(src, i + 1) == "(" {
+            // Find the end of the call.
+            var depth: i64 = 0;
+            var k = i + 1;
+            var end = i + 1;
+            while k < tk_count && tk_line[k] <= tk_line[i] + 8 {
+                if tk_kind[k] == TK_OTHER {
+                    let ch = tok_of(src, k);
+                    if ch == "(" { depth = depth + 1; }
+                    else if ch == ")" {
+                        depth = depth - 1;
+                        if depth == 0 { end = k; break; }
+                    }
+                }
+                k = k + 1;
+            }
+            // A result is used when the statement binds it, guards on
+            // it or returns it. A call that stands alone drops it.
+            var used = false;
+            var j = i - 1;
+            while j >= 0 && tk_line[j] >= tk_line[i] - 2 && i - j <= 8 {
+                if tk_kind[j] == TK_OTHER {
+                    let ch = tok_of(src, j);
+                    if ch == "=" || ch == ":" || ch == "&&" || ch == "||" {
+                        used = true;
+                        break;
+                    }
+                }
+                if tk_kind[j] == TK_IDENT {
+                    let w = tok_of(src, j);
+                    if w == "if" || w == "guard" || w == "return"
+                        || w == "while" || w == "and" || w == "or" {
+                        used = true;
+                        break;
+                    }
+                }
+                j = j - 1;
+            }
+            if used { i = end; continue; }
+            if end + 1 < tk_count {
+                let next = tk_kind[end + 1];
+                let nxt = tok_of(src, end + 1);
+                if next == TK_OTHER && (nxt == ";" || nxt == ")" || nxt == ",") {
+                    rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
+                        "the result of the call is dropped");
+                }
+            }
+        }
+        i = i + 1;
+    }
+}
+
+// is_number_word reports whether the text is a decimal number.
+fn is_number_word(text: const u8[:]) -> bool {
+    if text.len == 0 { return false; }
+    var i: i64 = 0;
+    while i < text.len {
+        if text[i] < 48 || text[i] > 57 { return false; }
+        i = i + 1;
+    }
+    return true;
+}

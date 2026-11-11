@@ -60,6 +60,10 @@ fn main() {
     check(count_rule("let a = \"\xE2\x80\xAE\";\n", "G116") == 1, "G116 bidi");
     check(count_rule("let a = \"/\";\n", "G111") == 1, "G111 root");
 
+    check(count_rule("write_file(\"a\", d);\n", "G104") == 1, "G104 dropped result");
+    check(count_rule("let ok = write_file(\"a\", d);\n", "G104") == 0, "G104 bound result");
+    check(count_rule("if file_exists(\"a\") { }\n", "G104") == 0, "G104 guarded result");
+
     check(count_rule("extern \"c_fn\" fn f(x: i64);\n", "G103") == 1, "G103 extern");
     check(count_rule("json::format_string(out, api_token);\n", "G117") == 1, "G117 secret into json");
     check(count_rule("json::format_string(out, name);\n", "G117") == 0, "G117 clean");
