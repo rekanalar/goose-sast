@@ -3,6 +3,8 @@
 // \xNN escape, so a line never breaks the layout.
 namespace sast;
 
+import json;
+
 // sev_name gives the name of a severity.
 fn sev_name(sev: i64) -> const u8[:] {
     if sev >= SEV_CRITICAL { return "critical"; }
@@ -60,4 +62,54 @@ fn format_text(fs: const Finding[:], out: u8[>..]&) {
 fn format_summary(findings: i64, scanned: i64, skipped: i64, out: u8[>..]&) {
     format(out, "sast: ", findings, " finding(s), ", scanned, " file(s) scanned, ",
            skipped, " file(s) skipped\n");
+}
+
+// json_text writes s as a JSON string. A byte outside printable ASCII
+// first becomes a \xNN escape, so the output is valid UTF-8 and holds
+// no control byte.
+fn json_text(out: u8[>..]&, s: const u8[:]) {
+    var safe: u8[>..] = [];
+    put_escaped(safe, s);
+    json::format_string(out, safe[..]);
+}
+
+// format_json writes one JSON object: the findings, the totals per
+// severity, the count of scanned files and the count of skipped files.
+fn format_json(fs: const Finding[:], scanned: i64, skipped: i64, out: u8[>..]&) {
+    reg_ensure();
+    var by_sev: i64[5] = [0, 0, 0, 0, 0];
+    out.push(123);
+    json::format_key(out, "findings");
+    out.push(91);
+    var i: i64 = 0;
+    while i < fs.len {
+        let f = fs[i];
+        if i > 0 { out.push(44); }
+        if f.sev >= 1 && f.sev <= 4 { by_sev[f.sev] = by_sev[f.sev] + 1; }
+        out.push(123);
+        json::format_key(out, "rule"); json_text(out, reg_id_s[f.rule]); out.push(44);
+        json::format_key(out, "severity"); json_text(out, sev_name(f.sev)); out.push(44);
+        json::format_key(out, "confidence"); json_text(out, conf_name(f.conf)); out.push(44);
+        json::format_key(out, "cwe"); json::format_int(out, f.cwe); out.push(44);
+        json::format_key(out, "file"); json_text(out, path_of(f.file)); out.push(44);
+        json::format_key(out, "line"); json::format_int(out, f.line); out.push(44);
+        json::format_key(out, "column"); json::format_int(out, f.col); out.push(44);
+        json::format_key(out, "message"); json_text(out, msg_of(f));
+        out.push(125);
+        i = i + 1;
+    }
+    out.push(93);
+    out.push(44);
+    json::format_key(out, "totals");
+    out.push(123);
+    json::format_key(out, "low"); json::format_int(out, by_sev[1]); out.push(44);
+    json::format_key(out, "medium"); json::format_int(out, by_sev[2]); out.push(44);
+    json::format_key(out, "high"); json::format_int(out, by_sev[3]); out.push(44);
+    json::format_key(out, "critical"); json::format_int(out, by_sev[4]);
+    out.push(125);
+    out.push(44);
+    json::format_key(out, "scanned"); json::format_int(out, scanned); out.push(44);
+    json::format_key(out, "skipped"); json::format_int(out, skipped);
+    out.push(125);
+    out.push(10);
 }

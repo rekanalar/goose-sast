@@ -212,6 +212,8 @@ fn reg_ensure() {
     reg_put("B412", SEV_HIGH, CONF_HIGH, 386, "", "an import of a cgi handler is in use");
     reg_put("B413", SEV_HIGH, CONF_HIGH, 327, "", "an import of a crypto cipher library is in use");
     reg_put("B414", SEV_LOW, CONF_HIGH, 327, "", "an import of a cryptography module is in use");
+    reg_put("G103", SEV_LOW, CONF_HIGH, 242, "", "an extern function calls code outside the type checker");
+    reg_put("G117", SEV_MEDIUM, CONF_MEDIUM, 499, "", "a secret-named value goes into a JSON writer");
     reg_put("B415", SEV_HIGH, CONF_HIGH, 502, "", "an import of a web application bridge is in use");
 }
 

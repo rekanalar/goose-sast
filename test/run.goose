@@ -1,6 +1,7 @@
 // The tests of the linter: each rule on a source text, the filters,
 // the suppression comments and the escape of hostile bytes.
 import std;
+import json;
 import sast from "..";
 
 var fails: i64 = 0;
@@ -58,6 +59,10 @@ fn main() {
     check(count_rule("let a = \"\xE2\x80\xAE\";\n", "G116") == 1, "G116 bidi");
     check(count_rule("let a = \"/\";\n", "G111") == 1, "G111 root");
 
+    check(count_rule("extern \"c_fn\" fn f(x: i64);\n", "G103") == 1, "G103 extern");
+    check(count_rule("json::format_string(out, api_token);\n", "G117") == 1, "G117 secret into json");
+    check(count_rule("json::format_string(out, name);\n", "G117") == 0, "G117 clean");
+
     // The aliases resolve to their rule.
     check(sast::reg_find("B311") == sast::reg_find("G404"), "alias B311");
     check(sast::reg_find("B613") == sast::reg_find("G116"), "alias B613");
@@ -108,6 +113,20 @@ fn main() {
     var rows: i64 = 0;
     for b in lines { if b == 10 { rows = rows + 1; } }
     check(rows == sast::rule_count(), "list has one line per rule");
+
+    // The JSON form parses with the JSON module and holds the totals.
+    var fj: sast::Finding[>..] = [];
+    sast::findings_reset();
+    sast::scan_text("a\x1b.goose", "let a = \"0.0.0.0\";\nlet r = rand_int(3);\n", o, fj);
+    var jo: u8[>..] = [];
+    sast::format_json(fj[..], 1, 0, jo);
+    var rawj = false;
+    for b in jo { if b == 27 { rawj = true; } }
+    check(!rawj, "json holds no control byte");
+    var doc: json::Node[>..] = [];
+    var dec: u8[>..] = [];
+    let root, jerr = json::parse(jo[..], doc, dec);
+    check(root != null, "json parses");
 
     if fails > 0 { abort("some checks failed"); }
     print("all sast checks pass");

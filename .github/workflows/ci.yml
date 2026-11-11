@@ -98,6 +98,7 @@ jobs:
           "$RUNNER_TEMP/sast" -no-fail -severity high test/rules | grep -q "G404"
           "$RUNNER_TEMP/sast" -no-fail -exclude G404,B311 test/rules > out.txt
           if grep -q "G404" out.txt; then echo "exclude kept G404"; exit 1; fi
+          "$RUNNER_TEMP/sast" -no-fail -f json test/rules | grep -q '"rule":"G101"'
           # A bad flag and a bad rule ID end with exit 2.
           set +e
           "$RUNNER_TEMP/sast" -bogus test/rules 2> /dev/null; code=$?

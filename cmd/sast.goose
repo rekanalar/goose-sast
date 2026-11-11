@@ -42,6 +42,7 @@ fn usage() {
     write_stderr("  -exclude ID[,ID]                     the rule IDs to leave out\n");
     write_stderr("  -include ID[,ID]                     only these rule IDs\n");
     write_stderr("  -exclude-path NAME[,NAME]            path parts to skip in the walk\n");
+    write_stderr("  -f text|json                         the output format (default text)\n");
     write_stderr("  -quiet                               no output but the exit code\n");
     write_stderr("  -no-fail                             always exit 0\n");
     write_stderr("  -list-rules                          print the rule list and exit\n");
@@ -82,6 +83,7 @@ fn main() {
     var quiet = false;
     var no_fail = false;
     var list_rules = false;
+    var json_out = false;
     var target_count: i64 = 0;
     var bad: u8[>..] = [];
 
@@ -126,6 +128,14 @@ fn main() {
                 sast::opt_skip_path(parts[k]);
                 k = k + 1;
             }
+        } else if a[..] == "-f" {
+            i = i + 1;
+            if i >= arg_count() { die("the flag needs a value"); }
+            var v: u8[>..] = [];
+            arg(i, v);
+            if v[..] == "json" { json_out = true; }
+            else if v[..] == "text" { json_out = false; }
+            else { die("the format is text or json"); }
         } else if a[..] == "-quiet" {
             quiet = true;
         } else if a[..] == "-no-fail" {
@@ -179,8 +189,12 @@ fn main() {
 
     if !quiet {
         var out: u8[>..] = [];
-        sast::format_text(findings[..], out);
-        sast::format_summary(findings.len, scanned, skipped, out);
+        if json_out {
+            sast::format_json(findings[..], scanned, skipped, out);
+        } else {
+            sast::format_text(findings[..], out);
+            sast::format_summary(findings.len, scanned, skipped, out);
+        }
         write_stdout(out[..]);
     }
     if no_fail { exit(0); }

@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.1.0";
+import sast from "rekanalar/goose-sast@v0.2.0";
 ```
 
 Build the command from the package root:
@@ -23,7 +23,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.1.0";
+import sast from "rekanalar/goose-sast@v0.2.0";
 
 fn main() {
     var o = sast::default_options();
@@ -50,6 +50,7 @@ fn main() {
 | `reg_find(id) -> i64` | gives the registry index of an ID, or -1 |
 | `list_rules(out)` | writes one line per rule |
 | `format_text(findings, out)` | writes one line per finding |
+| `format_json(findings, scanned, skipped, out)` | writes one JSON object: the findings, the totals per severity and the file counts |
 | `format_summary(findings, scanned, skipped, out)` | writes the count line |
 
 ## Command
@@ -61,6 +62,7 @@ fn main() {
 | `-exclude ID,ID` | leaves rules out |
 | `-include ID,ID` | keeps only these rules |
 | `-exclude-path NAME,NAME` | skips path parts in the walk |
+| `-f text\|json` | the output format; text is the default |
 | `-quiet` | prints nothing; the exit code stays |
 | `-no-fail` | always exits 0 |
 | `-list-rules` | prints the rule list |
@@ -79,8 +81,10 @@ The rule IDs follow the IDs of `gosec` and `bandit`, with the aliases below. Run
 |---|---|
 | G101 (B105, B106, B107) | a credential literal beside a secret-named name |
 | G102 (B104) | a bind-all address literal |
+| G103 | an `extern` declaration |
 | G109 (G115) | an `as!` cast to a smaller integer |
 | G116 (B613) | a bidirectional control character in the source |
+| G117 | a secret-named value in a JSON writer call |
 | G201, G202 (B608) | a SQL string built from a variable |
 | G203 | HTML built from a variable |
 | G204 | a process command from a variable |

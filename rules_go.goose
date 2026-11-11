@@ -146,3 +146,42 @@ fn rule_timeout(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
         i = i + 1;
     }
 }
+
+// rule_extern runs G103: an extern declaration binds code that the
+// type checker cannot see.
+fn rule_extern(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let idx = reg_find("G103");
+    var i: i64 = 0;
+    while i < tk_count {
+        if tk_kind[i] == TK_IDENT && tok_of(src, i) == "extern"
+            && i + 1 < tk_count && tk_kind[i + 1] == TK_STRING {
+            rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
+                "an extern function calls code outside the type checker");
+        }
+        i = i + 1;
+    }
+}
+
+// rule_secretjson runs G117: a secret-named identifier on the line of
+// a call to a JSON writer.
+fn rule_secretjson(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let idx = reg_find("G117");
+    var i: i64 = 0;
+    while i < tk_count {
+        if tk_kind[i] == TK_IDENT && tok_of(src, i) == "json"
+            && i + 3 < tk_count && tok_of(src, i + 1) == ":"
+            && tok_of(src, i + 2) == ":" && tk_kind[i + 3] == TK_IDENT
+            && has_word(tok_of(src, i + 3), "format") {
+            var k = i + 4;
+            while k < tk_count && tk_line[k] == tk_line[i] {
+                if tk_kind[k] == TK_IDENT && name_holds_secret(tok_of(src, k)) {
+                    rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
+                        "a secret-named value goes into a JSON writer");
+                    break;
+                }
+                k = k + 1;
+            }
+        }
+        i = i + 1;
+    }
+}
