@@ -1,0 +1,148 @@
+// The language rules: the narrowing casts, the bidi characters, the
+// asserts, the empty catch bodies and the time limits.
+namespace sast;
+
+// rule_cast runs G109: an `as!` cast whose target type is a smaller
+// integer type. G115 is the alias.
+fn rule_cast(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    var i: i64 = 0;
+    while i < tk_count {
+        if tk_kind[i] == TK_IDENT && tok_of(src, i) == "as"
+            && i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER
+            && tok_of(src, i + 1) == "!"
+            && i + 2 < tk_count && tk_kind[i + 2] == TK_IDENT {
+            let ty = tok_of(src, i + 2);
+            if ty == "i8" || ty == "i16" || ty == "i32" || ty == "u8"
+                || ty == "u16" || ty == "u32" {
+                rep(out, 2, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
+                    "a narrowing cast may lose bits");
+            }
+        }
+        i = i + 1;
+    }
+}
+
+// rule_bidi runs G116: a bidirectional control character anywhere in
+// the source. B613 is the alias.
+fn rule_bidi(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    var i: i64 = 0;
+    var line: i64 = 1;
+    var col: i64 = 1;
+    while i < src.len {
+        let b = src[i];
+        // The bidi characters start with the byte 226 (0xE2) and sit in
+        // the ranges U+202A to U+202E and U+2066 to U+2069, plus the
+        // marks U+200E, U+200F and U+061C.
+        if b == 226 && i + 2 < src.len {
+            let m = src[i + 1];
+            let l = src[i + 2];
+            let marks = (m == 0x80 && l >= 0xAA && l <= 0xAE)
+                || (m == 0x81 && l >= 0xA6 && l <= 0xA9);
+            if marks {
+                rep(out, 3, file_idx, line, col,
+                    "the source holds bidirectional control characters");
+            }
+        } else if b == 216 && i + 1 < src.len && src[i + 1] == 156
+            && i + 2 < src.len && src[i + 2] >= 156 && src[i + 2] <= 159 {
+            // U+061C, the Arabic letter mark, in 0xD8 0x9C to 0xD8 0x9F.
+            rep(out, 3, file_idx, line, col,
+                "the source holds bidirectional control characters");
+        } else if b == 226 && i + 2 < src.len && src[i + 1] == 0x80
+            && (src[i + 2] == 0x8E || src[i + 2] == 0x8F) {
+            rep(out, 3, file_idx, line, col,
+                "the source holds bidirectional control characters");
+        }
+        if b == 10 { line = line + 1; col = 1; } else { col = col + 1; }
+        i = i + 1;
+    }
+}
+
+// in_test_file reports whether the path names a test file.
+fn in_test_file(path: const u8[:]) -> bool {
+    var low: u8[>..] = [];
+    lower_of(path, low);
+    return has_word(low[..], "test");
+}
+
+// rule_assert runs B101: an assert call in a file that is not a test.
+fn rule_assert(path: const u8[:], src: const u8[:],
+               file_idx: i64, out: Finding[>..]&) {
+    if in_test_file(path) { return; }
+    var i: i64 = 0;
+    while i < tk_count {
+        if tk_kind[i] == TK_IDENT && tok_of(src, i) == "assert"
+            && i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER
+            && tok_of(src, i + 1) == "(" {
+            rep(out, 16, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
+                "an assert may be removed in a release build");
+        }
+        i = i + 1;
+    }
+}
+
+// rule_emptycatch runs B110: a try call whose trailing block holds no
+// token. B112 is the alias.
+fn rule_emptycatch(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    var i: i64 = 0;
+    while i < tk_count {
+        if tk_kind[i] == TK_IDENT && tok_of(src, i) == "try"
+            && i > 1 && tk_kind[i - 1] == TK_OTHER && tok_of(src, i - 1) == "::"
+            && tk_kind[i - 2] == TK_IDENT && tok_of(src, i - 2) == "exception" {
+            // Find the last brace of the line group that follows.
+            var k = i + 1;
+            var opened = -1;
+            while k < tk_count && tk_line[k] <= tk_line[i] + 40 {
+                if tk_kind[k] == TK_OTHER && tok_of(src, k) == "{" {
+                    opened = k;
+                } else if opened >= 0 && tk_kind[k] == TK_OTHER
+                    && tok_of(src, k) == "}" {
+                    // The block holds a token when the open sits before
+                    // the close in the token list.
+                    if opened + 1 == k {
+                        rep(out, 17, file_idx, tk_line[i],
+                            tok_col_of(src, tk_start[i]),
+                            "a catch body holds nothing");
+                    }
+                    opened = -1;
+                }
+                k = k + 1;
+            }
+        }
+        i = i + 1;
+    }
+}
+
+// rule_timeout runs B113: a wait call whose time limit is a literal 0.
+fn rule_timeout(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    var i: i64 = 0;
+    while i < tk_count {
+        if tk_kind[i] == TK_IDENT && tok_of(src, i) == "wait"
+            && i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER
+            && tok_of(src, i + 1) == "(" {
+            // The second argument is the limit. A literal 0 is the
+            // missing limit.
+            var depth: i64 = 0;
+            var commas: i64 = 0;
+            var k = i + 2;
+            while k < tk_count && tk_line[k] <= tk_line[i] + 4 {
+                if tk_kind[k] == TK_OTHER {
+                    let ch = tok_of(src, k);
+                    if ch == "(" { depth = depth + 1; }
+                    else if ch == ")" {
+                        depth = depth - 1;
+                        if depth < 0 { break; }
+                    }
+                    else if ch == "," && depth == 0 { commas = commas + 1; }
+                }
+                if tk_kind[k] == TK_NUMBER && commas == 1 && depth == 0
+                    && tok_of(src, k) == "0" {
+                    rep(out, 18, file_idx, tk_line[i],
+                        tok_col_of(src, tk_start[i]),
+                        "a wait takes no time limit");
+                }
+                k = k + 1;
+            }
+        }
+        i = i + 1;
+    }
+}
