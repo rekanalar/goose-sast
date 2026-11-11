@@ -43,21 +43,29 @@ fn name_holds_secret(name: const u8[:]) -> bool {
         || has_word(low[..], "privatekey") || has_word(low[..], "private_key");
 }
 
-// rule_cred runs G101: a string literal bound to a secret-named name,
-// or passed as an argument beside a secret-named name.
+// rule_cred runs G101: a string literal bound to a secret-named name.
+// The name and the literal must sit in the same scope, so a secret name
+// of one block does not match a literal of another.
 fn rule_cred(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {
-        if tk_kind[i] == TK_IDENT && tk_start[i] + 5 <= src.len {
-            // The name itself is not quoted; a secret name followed by
-            // an assignment or an argument is the match.
-            let name = tok_of(src, i);
-            if name_holds_secret(name) {
-                // The same line holds a string literal.
-                var k = i + 1;
-                while k < tk_count && tk_line[k] == tk_line[i] {
-                    if tk_kind[k] == TK_STRING {
-                        let lit = tok_of(src, k);
+        if tk_kind[i] == TK_IDENT && name_holds_secret(tok_of(src, i)) {
+            // The name is bound by an = or a : and takes a literal.
+            var k = i + 1;
+            var bound = false;
+            while k < tk_count && tk_line[k] == tk_line[i] {
+                if tk_kind[k] == TK_OTHER
+                    && (tok_of(src, k) == "=" || tok_of(src, k) == ":") {
+                    bound = true;
+                    break;
+                }
+                k = k + 1;
+            }
+            if bound {
+                var m = k + 1;
+                while m < tk_count && tk_line[m] == tk_line[i] {
+                    if tk_kind[m] == TK_STRING {
+                        let lit = tok_of(src, m);
                         if lit.len > 2 {
                             rep(out, 0, file_idx, tk_line[i],
                                 tok_col_of(src, tk_start[i]),
@@ -65,7 +73,8 @@ fn rule_cred(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                         }
                         break;
                     }
-                    k = k + 1;
+                    if tk_kind[m] == TK_OTHER && tok_of(src, m) == ")" { break; }
+                    m = m + 1;
                 }
             }
         }

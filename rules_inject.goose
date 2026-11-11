@@ -18,21 +18,30 @@ fn holds_sql(text: const u8[:]) -> bool {
 
 // rule_sql runs G201 and G202: a SQL literal is G202, and B608 is its
 // alias. A SQL literal built with a format or a str call on the same
-// line is G201.
+// line is G201. The parts of the query may sit on several lines, so the
+// rule reads the tokens of the statement, not the line.
 fn rule_sql(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_STRING && holds_sql(lit_body(tok_of(src, i))) {
             let line = tk_line[i];
-            var k = tok_find_line_start( line);
+            // The statement ends at the next semicolon.
+            var end = i;
+            while end < tk_count && tk_line[end] <= line + 8 {
+                if tk_kind[end] == TK_OTHER && tok_of(src, end) == ";" { break; }
+                end = end + 1;
+            }
             var fmtcall = false;
             var concat = false;
-            while k < tk_count && tk_line[k] == line {
-                if tk_kind[k] == TK_OTHER && tok_of(src, k) == "+" { concat = true; }
+            var k = i;
+            while k < end {
                 if tk_kind[k] == TK_IDENT
                     && (tok_of(src, k) == "str" || tok_of(src, k) == "format"
                         || tok_of(src, k) == "format_replaced") {
                     fmtcall = true;
+                }
+                if tk_kind[k] == TK_OTHER && tok_of(src, k) == "+" {
+                    concat = true;
                 }
                 k = k + 1;
             }

@@ -9,8 +9,12 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.2.0";
+import sast from "rekanalar/goose-sast@v0.3.0";
+import semver from "rekanalar/goose-semver@v1.0.1";
 ```
+
+The advisory check reads its version ranges through the semver module.
+A program that uses this package declares both.
 
 Build the command from the package root:
 
@@ -23,7 +27,8 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.2.0";
+import sast from "rekanalar/goose-sast@v0.3.0";
+import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
     var o = sast::default_options();
@@ -47,6 +52,10 @@ fn main() {
 | `findings_reset()` | empties the path and message buffers before a run |
 | `opt_exclude(id)`, `opt_include(id)` | filters by rule ID; an alias ID works too |
 | `opt_skip_path(part)` | skips a path part in the walk |
+| `read_manifest(src) -> i64` | reads the import lines into dependencies; gives the count |
+| `read_policy(text, err) -> bool` | reads the policy JSON; false on a fault |
+| `read_advisories(text, err) -> bool` | reads the advisory JSON in the RustSec shape |
+| `check_deps(src, out) -> i64` | runs the ban, licence, source and advisory checks; gives the count |
 | `reg_find(id) -> i64` | gives the registry index of an ID, or -1 |
 | `list_rules(out)` | writes one line per rule |
 | `format_text(findings, out)` | writes one line per finding |
@@ -63,6 +72,10 @@ fn main() {
 | `-include ID,ID` | keeps only these rules |
 | `-exclude-path NAME,NAME` | skips path parts in the walk |
 | `-f text\|json` | the output format; text is the default |
+| `-max-depth N` | the directory levels the walk reads |
+| `-max-files N` | the files the walk reads |
+| `-policy FILE` | runs the dependency checks with this policy |
+| `-advisories FILE` | runs the advisory check with this file |
 | `-quiet` | prints nothing; the exit code stays |
 | `-no-fail` | always exits 0 |
 | `-list-rules` | prints the rule list |
@@ -72,6 +85,8 @@ The exit code is 0 with no finding, 1 with findings and 2 when the scan fails.
 ## Suppression
 
 A comment on the line of a finding silences it. `// nosec`, `// noqa` and `// nosemgrep` all work. A list of rule IDs after the word limits the comment to those rules. An alias ID counts as its rule.
+
+A block suppression covers many lines. A comment with `// nosec:start` opens one, and a comment with `// nosec:end` closes it. Every finding between the two markers stays out. A marker with no end reaches the last line of the file.
 
 ## Rules
 
@@ -91,6 +106,7 @@ The rule IDs follow the IDs of `gosec` and `bandit`, with the aliases below. Run
 | G301, G302 (B103), G306 | a wide permission literal |
 | G303 (B108), G304, G111 | a temp path, a variable path, the root path |
 | G401 (B324) | a weak hash |
+| G702, G703 | a value from the command line, the environment or a file reaches a process call or a file path |
 | G404 (B311) | a weak random source |
 | G501 to G507, B401 to B415 | blocklisted imports |
 | B101 | an `assert` outside a test file |
@@ -98,18 +114,30 @@ The rule IDs follow the IDs of `gosec` and `bandit`, with the aliases below. Run
 | B113 | a `wait` with a zero limit |
 | B607, B609 | a partial command path, a wildcard argument |
 
+The dependency checks report under their own IDs.
+
+| Rule | Defect |
+|---|---|
+| BAN | a banned package, or a package in a banned version range |
+| LICENSE | a licence that is not on the allow list, or a missing licence |
+| SOURCE | a source that is not on the allow list |
+| ADVISORY | a pinned version that an advisory range covers |
+
 ## Limits
 
 - The rules read the source as text. A name that a program builds at run time stays invisible.
 - The tokenizer holds strings, comments, identifiers and numbers. It does not parse the language, so a rule that needs types does not exist.
+- A rule that matches on a name alone, such as G401, matches a local function of that name too. The linter cannot tell the two apart. Read such a finding before you act on it.
+- The scope rules use the brace depth. A name of a deeper scope hides the name of an outer scope. A name of a sibling scope still matches.
 - Most rules of the references have no Goose surface. The standard library holds no TLS, HTTP, SQL, archive or template code. The package leaves those rules out.
-- The dependency policy and advisory checks are not in this release.
+- The advisory file holds the advisories of Rust packages. No Goose advisory database exists. The package reads the RustSec file format and reports the hits of the package names that match.
+- The tool runs offline. It reads no network and holds no database of its own.
 - The `sast` command reads one path per run.
 
 ## Security
 
-- The scan bounds one file at 16 MiB, the walk at 4096 files and 64 directory levels.
-- The walk follows symbolic links, because the standard library has no call that tells a link from a directory. A link loop ends at the depth bound. A link that points outside the tree makes the scan read files outside it. Scan only trees that you trust, or skip a link with `-exclude-path`.
+- The scan bounds one file at 16 MiB, the walk at 4096 files and 64 directory levels. The `-max-files` and `-max-depth` flags lower both bounds.
+- The walk follows symbolic links, because the standard library has no call that tells a link from a directory. A link loop ends at the depth bound. A link that points outside the tree makes the scan read files outside it. Scan only trees that you trust. The `-max-depth` and `-max-files` flags bound the work of a loop, and `-exclude-path` skips a name.
 - The output writes each byte outside printable ASCII as `\xNN`. A hostile path cannot inject a control sequence into a terminal.
 - A file that the scan cannot read counts as skipped. The summary line shows the count, so a skipped file never hides.
 - The scan runs no code from the files it reads.

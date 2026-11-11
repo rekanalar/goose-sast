@@ -1,6 +1,7 @@
 // Scans one source text and prints the findings.
 import std;
 import sast from "..";
+import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
     var o = sast::default_options();

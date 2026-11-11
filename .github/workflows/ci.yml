@@ -105,6 +105,29 @@ jobs:
           set -e
           test "$code" = 2
           "$RUNNER_TEMP/sast" -list-rules | grep -q "^G101 "
+          # The block suppression covers the lines between the markers.
+          printf '// nosec:start\nlet a = "0.0.0.0";\n// nosec:end\n' > "$RUNNER_TEMP/clean/b.goose"
+          "$RUNNER_TEMP/sast" "$RUNNER_TEMP/clean" | grep -q "0 finding"
+          # The dependency checks read the policy and the advisory file.
+          "$RUNNER_TEMP/sast" -policy test/deps/policy.json \
+            -advisories test/deps/advisories.json test/deps/root.goose > out.txt
+          grep -q "BAN" out.txt
+          grep -q "ADVISORY" out.txt
+          # The exit code of the dependency checks is the bitset of
+          # cargo-deny: advisories 1, bans 2, licenses 4, sources 8.
+          set +e
+          "$RUNNER_TEMP/sast" -policy test/deps/policy.json \
+            -advisories test/deps/advisories.json test/deps/root.goose > /dev/null
+          code=$?
+          set -e
+          test "$code" = 7
+          # A policy that does not parse is a fault.
+          printf '{ "bans": ' > "$RUNNER_TEMP/bad.json"
+          set +e
+          "$RUNNER_TEMP/sast" -policy "$RUNNER_TEMP/bad.json" test/deps/root.goose 2> /dev/null
+          code=$?
+          set -e
+          test "$code" = 2
         env:
           GOOSE_HOME: ${{ runner.temp }}/goose-home
 

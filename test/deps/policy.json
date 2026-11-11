@@ -1,0 +1,17 @@
+{
+  "bans": {
+    "deny": ["banned"],
+    "deny_versions": { "url": ">=0.2.0" }
+  },
+  "licenses": {
+    "allow": ["MIT"],
+    "require": true,
+    "per_dep": { "url": "MIT", "banned": "GPL" }
+  },
+  "sources": {
+    "allow": ["rekanalar"]
+  },
+  "advisories": {
+    "ignore": []
+  }
+}

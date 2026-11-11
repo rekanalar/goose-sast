@@ -1,0 +1,12 @@
+{
+  "advisories": [
+    {
+      "id": "RSEC-2021-0001",
+      "package": "url",
+      "title": "a bad url parser",
+      "severity": "high",
+      "versions": ">=0.1.0, <0.2.0",
+      "patched": "0.2.0"
+    }
+  ]
+}

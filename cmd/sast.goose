@@ -9,6 +9,7 @@
 import std;
 import os;
 import sast from "..";
+import semver from "rekanalar/goose-semver@v1.0.1";
 
 // sev_of reads the name of a severity.
 fn sev_of(name: const u8[:]) -> i64 {
@@ -33,6 +34,17 @@ fn split_list(list: const u8[:], out: const u8[:][>..]&) {
     if list.len > at { out.push(list[at..list.len]); }
 }
 
+// parse_num reads a decimal number. It gives -1 for anything else.
+fn parse_num(s: const u8[:]) -> i64 {
+    if s.len == 0 || s.len > 9 { return -1; }
+    var n: i64 = 0;
+    for b in s {
+        if b < 48 || b > 57 { return -1; }
+        n = n * 10 + (b - 48);
+    }
+    return n;
+}
+
 // usage prints the flags of the command.
 fn usage() {
     write_stderr("sast: a security linter for Goose source\n");
@@ -43,6 +55,10 @@ fn usage() {
     write_stderr("  -include ID[,ID]                     only these rule IDs\n");
     write_stderr("  -exclude-path NAME[,NAME]            path parts to skip in the walk\n");
     write_stderr("  -f text|json                         the output format (default text)\n");
+    write_stderr("  -max-depth N                        the directory levels the walk reads\n");
+    write_stderr("  -max-files N                        the files the walk reads\n");
+    write_stderr("  -policy FILE                        run the dependency checks with this policy\n");
+    write_stderr("  -advisories FILE                    run the advisory check with this file\n");
     write_stderr("  -quiet                               no output but the exit code\n");
     write_stderr("  -no-fail                             always exit 0\n");
     write_stderr("  -list-rules                          print the rule list and exit\n");
@@ -84,6 +100,10 @@ fn main() {
     var no_fail = false;
     var list_rules = false;
     var json_out = false;
+    var policy_path: u8[>..] = [];
+    var adv_path: u8[>..] = [];
+    var have_policy = false;
+    var have_adv = false;
     var target_count: i64 = 0;
     var bad: u8[>..] = [];
 
@@ -136,6 +156,27 @@ fn main() {
             if v[..] == "json" { json_out = true; }
             else if v[..] == "text" { json_out = false; }
             else { die("the format is text or json"); }
+        } else if a[..] == "-max-depth" || a[..] == "-max-files" {
+            i = i + 1;
+            if i >= arg_count() { die("the flag needs a value"); }
+            var v: u8[>..] = [];
+            arg(i, v);
+            let n = parse_num(v[..]);
+            if n < 0 { die("the flag takes a number"); }
+            if a[..] == "-max-depth" { o.max_depth = n; }
+            else { o.max_files = n; }
+        } else if a[..] == "-policy" || a[..] == "-advisories" {
+            i = i + 1;
+            if i >= arg_count() { die("the flag needs a value"); }
+            var v: u8[>..] = [];
+            arg(i, v);
+            if a[..] == "-policy" {
+                for b in v { policy_path.push(b); }
+                have_policy = true;
+            } else {
+                for b in v { adv_path.push(b); }
+                have_adv = true;
+            }
         } else if a[..] == "-quiet" {
             quiet = true;
         } else if a[..] == "-no-fail" {
@@ -187,6 +228,43 @@ fn main() {
         scanned = 1;
     }
 
+    var dep_bits: i64 = 0;
+    if have_policy || have_adv {
+        var policy_text: u8[>..] = [];
+        var perr: u8[>..] = [];
+        if have_policy {
+            if !read_file(policy_path[..], policy_text) {
+                die("cannot read the policy file");
+            }
+            if !sast::read_policy(policy_text[..], perr) { die(perr[..]); }
+        }
+        var adv_text: u8[>..] = [];
+        if have_adv {
+            if !read_file(adv_path[..], adv_text) {
+                die("cannot read the advisory file");
+            }
+            if !sast::read_advisories(adv_text[..], perr) { die(perr[..]); }
+        }
+        // The manifest is the import lines of the file that was scanned.
+        var root_src: u8[>..] = [];
+        if !read_file(target_at(0), root_src) { die("cannot read the file"); }
+        var df: sast::Finding[>..] = [];
+        sast::findings_reset();
+        sast::check_deps(root_src[..], df);
+        // The bitset of cargo-deny: advisories 1, bans 2, licenses 4,
+        // sources 8.
+        var i2: i64 = 0;
+        while i2 < df.len {
+            let rid = sast::reg_id_s[df[i2].rule];
+            if rid == "ADVISORY" { dep_bits = dep_bits | 1; }
+            else if rid == "BAN" { dep_bits = dep_bits | 2; }
+            else if rid == "LICENSE" { dep_bits = dep_bits | 4; }
+            else if rid == "SOURCE" { dep_bits = dep_bits | 8; }
+            i2 = i2 + 1;
+        }
+        for f in df { findings.push(f); }
+    }
+
     if !quiet {
         var out: u8[>..] = [];
         if json_out {
@@ -198,6 +276,7 @@ fn main() {
         write_stdout(out[..]);
     }
     if no_fail { exit(0); }
+    if dep_bits > 0 { exit(dep_bits); }
     if findings.len > 0 { exit(1); }
     exit(0);
 }

@@ -3,6 +3,7 @@
 import std;
 import json;
 import sast from "..";
+import semver from "rekanalar/goose-semver@v1.0.1";
 
 var fails: i64 = 0;
 
@@ -113,6 +114,94 @@ fn main() {
     var rows: i64 = 0;
     for b in lines { if b == 10 { rows = rows + 1; } }
     check(rows == sast::rule_count(), "list has one line per rule");
+
+    // A block suppression covers the lines between the markers.
+    check(count_rule("// nosec:start\nlet a = \"0.0.0.0\";\n// nosec:end\n", "G102") == 0, "block suppression");
+    check(count_rule("// nosec:start\nlet a = \"0.0.0.0\";\n", "G102") == 0, "block without an end");
+    check(count_rule("// nosec:start\nlet a = \"0.0.0.0\";\n// nosec:end\nlet b = \"0.0.0.0\";\n", "G102") == 1, "block ends");
+    check(count_rule("// nosec:start\nlet a = \"0.0.0.0\";\n// nosec:end\nlet b = \"0.0.0.0\";\n// nosec\n", "G102") == 1, "line after a block");
+
+    // The scope: a secret name and a literal of another block do not
+    // match, and a name of a deeper scope shadows an outer name.
+    check(count_rule("let password = \"hunter2hunter2\";\n", "G101") == 1, "G101 assignment");
+    check(count_rule("fn f() { let password = \"hunter2hunter2\"; }\n", "G101") == 1, "G101 in a block");
+    check(count_rule("let password = \"hunter2hunter2\";\nfn f() { let x = \"other\"; }\n", "G101") == 1, "G101 one scope");
+    check(count_rule("if p == \"hunter2hunter2\" { }\n", "G101") == 0, "G101 no binding");
+    check(count_rule("fn f(password: const u8[:]) { }\n", "G101") == 0, "G101 no literal");
+    check(count_rule("let token = \"abcdef123456\";\n", "G101") == 1, "G101 token");
+
+    // The taint map: a value from the command line reaches a process
+    // call, and a name of another scope does not.
+    check(count_rule("let x = args();\nrun(x, a);\n", "G702") == 1, "G702 taint to a process");
+    check(count_rule("let x = args();\nwrite_file(x, d);\n", "G703") == 1, "G703 taint to a path");
+    check(count_rule("let x = args();\nrun(\"ls\", a);\n", "G702") == 0, "G702 no taint");
+    check(count_rule("fn f() { let x = args(); }\nrun(x, a);\n", "G702") == 0, "G702 out of scope");
+    check(count_rule("let x = \"literal\";\nrun(x, a);\n", "G702") == 0, "G702 no source");
+
+    // The manifest reader reads the import lines.
+    var root: u8[>..] = [];
+    read_file("test/deps/root.goose", root);
+    check(sast::read_manifest(root[..]) == 2, "manifest count");
+    check(sast::dep_name(0) == "url", "manifest name");
+    check(sast::dep_source(0) == "rekanalar/goose-url", "manifest source");
+    check(sast::dep_tag(0) == "v0.1.1", "manifest tag");
+    check(sast::dep_line_of(0) == 2, "manifest line");
+    check(sast::dep_count() == 2, "manifest holds no stdlib import");
+
+    // The policy reader reads the four sections.
+    var pol: u8[>..] = [];
+    read_file("test/deps/policy.json", pol);
+    var perr: u8[>..] = [];
+    check(sast::read_policy(pol[..], perr), "policy parses");
+    check(sast::pol_banned("banned"), "policy ban");
+    check(!sast::pol_banned("url"), "policy no ban");
+    check(sast::pol_banver("url") == ">=0.2.0", "policy ban range");
+    check(sast::pol_licence_allowed("MIT"), "policy licence");
+    check(sast::pol_licence_of("banned") == "GPL", "policy per dep");
+    check(sast::pol_source_allowed("rekanalar"), "policy source");
+
+    // The advisory reader reads the RustSec shape.
+    var adv: u8[>..] = [];
+    read_file("test/deps/advisories.json", adv);
+    var aerr: u8[>..] = [];
+    check(sast::read_advisories(adv[..], aerr), "advisories parse");
+    check(sast::adv_count() == 1, "advisory count");
+    check(sast::adv_id(0) == "RSEC-2021-0001", "advisory id");
+    check(sast::adv_package(0) == "url", "advisory package");
+    check(sast::adv_severity(0) == "high", "advisory severity");
+    check(sast::adv_patched(0) == "0.2.0", "advisory patched");
+
+    // The dependency checks report each break.
+    var df: sast::Finding[>..] = [];
+    sast::findings_reset();
+    let n = sast::check_deps(root[..], df);
+    check(n == df.len, "dependency count");
+    var bans: i64 = 0;
+    var lics: i64 = 0;
+    var advs: i64 = 0;
+    for f in df {
+        let rid = sast::reg_id_s[f.rule];
+        if rid == "BAN" { bans = bans + 1; }
+        if rid == "LICENSE" { lics = lics + 1; }
+        if rid == "ADVISORY" { advs = advs + 1; }
+    }
+    check(bans == 1, "one banned package");
+    check(lics == 1, "one denied licence");
+    check(advs == 1, "one advisory hit");
+
+    // A clean manifest reports nothing.
+    var clean_root: u8[>..] = [];
+    for b in "import std;\n" { clean_root.push(b); }
+    var df2: sast::Finding[>..] = [];
+    sast::findings_reset();
+    check(sast::check_deps(clean_root[..], df2) == 0, "clean manifest");
+
+    // A policy that does not parse is a fault.
+    var bad: u8[>..] = [];
+    for b in "{ \"bans\": " { bad.push(b); }
+    var berr: u8[>..] = [];
+    check(!sast::read_policy(bad[..], berr), "bad policy faults");
+    check(berr.len > 0, "bad policy names the fault");
 
     // The JSON form parses with the JSON module and holds the totals.
     var fj: sast::Finding[>..] = [];

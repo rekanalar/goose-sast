@@ -11,10 +11,57 @@ fn ends_with(s: const u8[:], suffix: const u8[:]) -> bool {
     return s[s.len - suffix.len..s.len] == suffix;
 }
 
+// The block suppressions of the file. Each range holds a first line
+// and a last line.
+var supp_from: i64[>..] = [];
+var supp_to: i64[>..] = [];
+
+// suppress_ranges reads the block suppression comments of the source. A
+// comment with `nosec:start` opens a range, and a comment with
+// `nosec:end` closes it. A range with no end reaches the end of the
+// file.
+fn suppress_ranges(src: const u8[:]) {
+    supp_from.resize(0, 0);
+    supp_to.resize(0, 0);
+    var open: i64 = -1;
+    var i: i64 = 0;
+    while i < tk_count {
+        if tk_kind[i] == TK_COMMENT {
+            let text = tok_of(src, i);
+            if has_word(text, "nosec:start") {
+                open = tk_line[i];
+            } else if has_word(text, "nosec:end") {
+                if open >= 0 {
+                    supp_from.push(open);
+                    supp_to.push(tk_line[i]);
+                    open = -1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    if open >= 0 {
+        supp_from.push(open);
+        supp_to.push(tk_line[tk_count - 1]);
+    }
+}
+
+// in_block reports whether the line sits in a block suppression.
+fn in_block(line: i64) -> bool {
+    var i: i64 = 0;
+    while i < supp_from.len {
+        if line >= supp_from[i] && line <= supp_to[i] { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
 // suppressed reports whether the line of the finding holds a suppression
 // comment that names the rule or names none. The comment holds `nosec`,
-// `noqa` or `nosemgrep`, then an optional list of rule IDs.
+// `noqa` or `nosemgrep`, then an optional list of rule IDs. A block
+// suppression covers the line too.
 fn suppressed(src: const u8[:], line: i64, rule_id: const u8[:], alias: const u8[:]) -> bool {
+    if in_block(line) { return true; }
     let c = tok_line_comment(line);
     if c < 0 { return false; }
     let text = tok_of(src, c);
@@ -84,6 +131,7 @@ fn scan_text(path: const u8[:], src: const u8[:], o: Options, out: Finding[>..]&
     reg_ensure();
     let file_idx = add_path(path);
     tokenize(src);
+    suppress_ranges(src);
     var raw: Finding[>..] = [];
     rule_cred(src, file_idx, raw);
     rule_bind(src, file_idx, raw);
@@ -103,6 +151,7 @@ fn scan_text(path: const u8[:], src: const u8[:], o: Options, out: Finding[>..]&
     rule_timeout(src, file_idx, raw);
     rule_extern(src, file_idx, raw);
     rule_secretjson(src, file_idx, raw);
+    rule_taint(src, file_idx, raw);
     var kept: i64 = 0;
     for f in raw {
         let id = reg_id_s[f.rule];

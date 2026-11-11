@@ -13,6 +13,12 @@ import rules_crypto;
 import rules_inject;
 import rules_go;
 import scan;
+import manifest;
+import policy;
+import advise;
+import deps;
+import rules_taint;
+import semver from "rekanalar/goose-semver@v1.0.1";
 import format;
 
 // The severity order. A finding with a lower severity than the option
@@ -213,6 +219,12 @@ fn reg_ensure() {
     reg_put("B413", SEV_HIGH, CONF_HIGH, 327, "", "an import of a crypto cipher library is in use");
     reg_put("B414", SEV_LOW, CONF_HIGH, 327, "", "an import of a cryptography module is in use");
     reg_put("G103", SEV_LOW, CONF_HIGH, 242, "", "an extern function calls code outside the type checker");
+    reg_put("G702", SEV_HIGH, CONF_MEDIUM, 78, "", "a value from an outside source reaches a process call");
+    reg_put("G703", SEV_HIGH, CONF_MEDIUM, 22, "", "a value from an outside source reaches a file path");
+    reg_put("BAN", SEV_HIGH, CONF_HIGH, 0, "", "a dependency is banned");
+    reg_put("LICENSE", SEV_MEDIUM, CONF_HIGH, 0, "", "a dependency licence is not allowed");
+    reg_put("SOURCE", SEV_MEDIUM, CONF_HIGH, 0, "", "a dependency source is not allowed");
+    reg_put("ADVISORY", SEV_CRITICAL, CONF_HIGH, 0, "", "a dependency has a known advisory");
     reg_put("G117", SEV_MEDIUM, CONF_MEDIUM, 499, "", "a secret-named value goes into a JSON writer");
     reg_put("B415", SEV_HIGH, CONF_HIGH, 502, "", "an import of a web application bridge is in use");
 }

@@ -18,6 +18,9 @@ var tk_kind: i64[>..] = [];
 var tk_start: i64[>..] = [];
 var tk_end: i64[>..] = [];
 var tk_line: i64[>..] = [];
+// The brace depth of each token. The depth counts the open braces that
+// hold the token. A name of one depth is not the name of another.
+var tk_depth: i64[>..] = [];
 var tk_count: i64 = 0;
 
 // tok_reset empties the columns before a file.
@@ -26,6 +29,7 @@ fn tok_reset() {
     tk_start.resize(0, 0);
     tk_end.resize(0, 0);
     tk_line.resize(0, 0);
+    tk_depth.resize(0, 0);
     tk_count = 0;
 }
 
@@ -36,6 +40,12 @@ fn tok_push(kind: i64, start: i64, end: i64, line: i64) {
     tk_end.push(end);
     tk_line.push(line);
     tk_count = tk_count + 1;
+}
+
+// tok_push_depth pushes one token with its brace depth.
+fn tok_push_depth(kind: i64, start: i64, end: i64, line: i64, depth: i64) {
+    tok_push(kind, start, end, line);
+    tk_depth.push(depth);
 }
 
 // is_ident_byte reports whether the byte sits in an identifier.
@@ -75,6 +85,7 @@ fn tokenize(src: const u8[:]) {
     tok_reset();
     var i: i64 = 0;
     var line: i64 = 1;
+    var depth: i64 = 0;
     while i < src.len {
         let b = src[i];
         if b == 10 {
@@ -86,7 +97,7 @@ fn tokenize(src: const u8[:]) {
             // A comment runs to the end of the line.
             let at = i;
             while i < src.len && src[i] != 10 { i = i + 1; }
-            tok_push(TK_COMMENT, at, i, line);
+            tok_push_depth(TK_COMMENT, at, i, line, depth);
         } else if b == 34 || b == 39 {
             // A string holds its quotes. A backslash skips the next
             // byte. A string that never closes ends at the line end.
@@ -98,7 +109,7 @@ fn tokenize(src: const u8[:]) {
                 i = i + 1;
             }
             if i < src.len && src[i] == q { i = i + 1; }
-            tok_push(TK_STRING, at, i, line);
+            tok_push_depth(TK_STRING, at, i, line, depth);
         } else if b >= 48 && b <= 57 {
             let at = i;
             i = i + 1;
@@ -112,13 +123,23 @@ fn tokenize(src: const u8[:]) {
                 while i < src.len && ((src[i] >= 48 && src[i] <= 57)
                     || src[i] == 46 || src[i] == 95) { i = i + 1; }
             }
-            tok_push(TK_NUMBER, at, i, line);
+            tok_push_depth(TK_NUMBER, at, i, line, depth);
         } else if is_ident_byte(b) {
             let at = i;
             while i < src.len && is_ident_byte(src[i]) { i = i + 1; }
-            tok_push(TK_IDENT, at, i, line);
+            tok_push_depth(TK_IDENT, at, i, line, depth);
+        } else if b == 123 {
+            // An open brace raises the depth of the tokens that follow.
+            tok_push_depth(TK_OTHER, i, i + 1, line, depth);
+            depth = depth + 1;
+            i = i + 1;
+        } else if b == 125 {
+            // A close brace lowers the depth.
+            if depth > 0 { depth = depth - 1; }
+            tok_push_depth(TK_OTHER, i, i + 1, line, depth);
+            i = i + 1;
         } else {
-            tok_push(TK_OTHER, i, i + 1, line);
+            tok_push_depth(TK_OTHER, i, i + 1, line, depth);
             i = i + 1;
         }
     }
