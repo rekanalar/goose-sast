@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.7.0";
+import sast from "rekanalar/goose-sast@v0.7.1";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.7.0";
+import sast from "rekanalar/goose-sast@v0.7.1";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {

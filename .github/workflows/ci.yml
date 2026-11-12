@@ -188,8 +188,12 @@ jobs:
           grep -q "1 file(s) scanned" out.txt
           grep -q "1 file(s) skipped" out.txt
           # The config file names the rule files and the policy file.
-          printf '{ "rules": "%s" }\n' "$RUNNER_TEMP/r2.json" > "$RUNNER_TEMP/cfg2.json"
-          "$RUNNER_TEMP/sast" -no-fail -config "$RUNNER_TEMP/cfg2.json" "$RUNNER_TEMP/t1" > out.txt
+          # The path in the file holds no backslash, because a
+          # backslash is an escape in JSON and the path of the runner
+          # on Windows holds one.
+          printf '{ "rules": [ { "id": "HA02", "severity": "high", "kind": "ident", "text": "old_pass" } ] }\n' > ci-rules.json
+          printf '{ "rules": "ci-rules.json" }\n' > ci-config.json
+          "$RUNNER_TEMP/sast" -no-fail -config ci-config.json "$RUNNER_TEMP/t1" > out.txt
           grep -q "HA02" out.txt
           printf '{ "policy": "test/deps/policy.json", "advisories": "test/deps/advisories.json" }\n' > "$RUNNER_TEMP/cfg3.json"
           set +e
