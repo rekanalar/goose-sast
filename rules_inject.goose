@@ -21,6 +21,8 @@ fn holds_sql(text: const u8[:]) -> bool {
 // line is G201. The parts of the query may sit on several lines, so the
 // rule reads the tokens of the statement, not the line.
 fn rule_sql(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g201 = reg_must("G201");
+    let g202 = reg_must("G202");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_STRING && holds_sql(lit_body(tok_of(src, i))) {
@@ -46,11 +48,9 @@ fn rule_sql(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                 k = k + 1;
             }
             if fmtcall {
-                rep(out, 4, file_idx, line, tok_col_of(src, tk_start[i]),
-                    "a SQL query is built with a format call");
+                rep(out, g201, file_idx, line, tok_col_of(src, tk_start[i]));
             } else if concat {
-                rep(out, 5, file_idx, line, tok_col_of(src, tk_start[i]),
-                    "a SQL query is built by concatenation");
+                rep(out, g202, file_idx, line, tok_col_of(src, tk_start[i]));
             }
         }
         i = i + 1;
@@ -60,6 +60,7 @@ fn rule_sql(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
 // rule_html runs G203: a tag-like literal concatenated with an
 // identifier on the same line.
 fn rule_html(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g203 = reg_must("G203");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_STRING {
@@ -77,8 +78,7 @@ fn rule_html(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                     k = k + 1;
                 }
                 if concat {
-                    rep(out, 6, file_idx, line, tok_col_of(src, tk_start[i]),
-                        "HTML is built from a variable");
+                    rep(out, g203, file_idx, line, tok_col_of(src, tk_start[i]));
                 }
             }
         }
@@ -109,6 +109,8 @@ fn is_proc_call(name: const u8[:]) -> bool {
 // is a variable is G204; a command literal with no path separator is
 // B607.
 fn rule_proc(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g204 = reg_must("G204");
+    let b607 = reg_must("B607");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && is_proc_call(tok_of(src, i))
@@ -117,8 +119,7 @@ fn rule_proc(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
             var k = i + 2;
             while k < tk_count && tk_line[k] == tk_line[i] {
                 if tk_kind[k] == TK_IDENT {
-                    rep(out, 7, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                        "a command is built from a variable");
+                    rep(out, g204, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     break;
                 }
                 if tk_kind[k] == TK_STRING {
@@ -130,9 +131,7 @@ fn rule_proc(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                         j = j + 1;
                     }
                     if !sep {
-                        rep(out, 19, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]),
-                            "a command holds a partial path");
+                        rep(out, b607, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     }
                     break;
                 }
@@ -166,6 +165,7 @@ fn enclosing_call(src: const u8[:], i: i64) -> const u8[:] {
 // rule_wildcard runs B609: a literal `*` argument to a process call.
 // The wildcard expands only where a command runs.
 fn rule_wildcard(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let b609 = reg_must("B609");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_STRING && lit_body(tok_of(src, i)) == "*"
@@ -173,8 +173,7 @@ fn rule_wildcard(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
             && (tok_of(src, i - 1) == "(" || tok_of(src, i - 1) == ",") {
             let call = enclosing_call(src, i);
             if is_proc_call(call) {
-                rep(out, 20, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                    "a wildcard may expand in a command");
+                rep(out, b609, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
             }
         }
         i = i + 1;

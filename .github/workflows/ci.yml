@@ -70,6 +70,25 @@ jobs:
         env:
           GOOSE_HOME: ${{ runner.temp }}/goose-home
 
+      - name: Check the exact lookup
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          goose build -o "$RUNNER_TEMP/probe" test/abort_probe.goose
+          # A rule ID gives its registry index and exits 0.
+          "$RUNNER_TEMP/probe" G101
+          # An ID that no row carries aborts and names the ID. An alias
+          # names no row, so it aborts too.
+          for id in ZZ999 B105; do
+            set +e
+            "$RUNNER_TEMP/probe" "$id" 2> probe.txt; code=$?
+            set -e
+            test "$code" != 0
+            grep -q "$id" probe.txt
+          done
+        env:
+          GOOSE_HOME: ${{ runner.temp }}/goose-home
+
       - name: Run the examples
         timeout-minutes: 15
         run: |

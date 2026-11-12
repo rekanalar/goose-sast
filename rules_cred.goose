@@ -2,9 +2,10 @@
 // addresses, the temp and variable paths, and the permission literals.
 namespace sast;
 
-// rep builds one finding from the registry row of the rule index.
-fn rep(out: Finding[>..]&, idx: i64, file_idx: i64, line: i64, col: i64,
-       msg: const u8[:]) {
+// rep_msg builds one finding from the registry row of the rule index,
+// with its own message text.
+fn rep_msg(out: Finding[>..]&, idx: i64, file_idx: i64, line: i64, col: i64,
+           msg: const u8[:]) {
     reg_ensure();
     let at = buf_texts.len;
     var i: i64 = 0;
@@ -14,6 +15,12 @@ fn rep(out: Finding[>..]&, idx: i64, file_idx: i64, line: i64, col: i64,
         cwe: reg_cwe_s[idx], file: file_idx, line: line, col: col,
         msg: at, msg_end: buf_texts.len, fp: 0, fp_end: 0,
     });
+}
+
+// rep builds one finding from the registry row of the rule index. The
+// message of the row is the message of the finding.
+fn rep(out: Finding[>..]&, idx: i64, file_idx: i64, line: i64, col: i64) {
+    rep_msg(out, idx, file_idx, line, col, reg_msg_s[idx]);
 }
 
 // lower_of gives the lowercase form of s, into out.
@@ -91,6 +98,7 @@ fn secret_literal(body: const u8[:], class: i64) -> bool {
 // The name and the literal must sit on the same line, so a secret name
 // of one function does not match a literal of another.
 fn rule_cred(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g101 = reg_must("G101");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT {
@@ -115,9 +123,7 @@ fn rule_cred(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                             if lit.len > 2 {
                                 let body = lit[1..lit.len - 1];
                                 if secret_literal(body, class) {
-                                    rep(out, 0, file_idx, tk_line[i],
-                                        tok_col_of(src, tk_start[i]),
-                                        "a credential may be hardcoded");
+                                    rep(out, g101, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                                 }
                             }
                             break;
@@ -182,6 +188,7 @@ fn bind_callee(src: const u8[:], i: i64) -> const u8[:] {
 // literal alone is no bind, so the rule reads the callee of the call
 // that holds it.
 fn rule_bind(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g102 = reg_must("G102");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_STRING {
@@ -192,9 +199,7 @@ fn rule_bind(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                 if body == "0.0.0.0" || body == "::" || body == "[::]" {
                     let callee = bind_callee(src, i);
                     if callee.len > 0 && is_bind_call(callee) {
-                        rep(out, 1, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]),
-                            "the program binds to all interfaces");
+                        rep(out, g102, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     }
                 }
             }
@@ -236,6 +241,9 @@ fn in_path_call(src: const u8[:], i: i64) -> bool {
 // rule_paths runs G303, G304 and G111: the temp paths, the variable
 // paths of the file calls, and the root path literal.
 fn rule_paths(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g111 = reg_must("G111");
+    let g303 = reg_must("G303");
+    let g304 = reg_must("G304");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_STRING {
@@ -246,11 +254,9 @@ fn rule_paths(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                 // call. A separator push or a format call does not.
                 if in_path_call(src, i) {
                     if body == "/" {
-                        rep(out, 15, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]), "the path is the root directory");
+                        rep(out, g111, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     } else if has_word(body, "/tmp/") || has_word(body, "/var/tmp/") {
-                        rep(out, 10, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]), "a temp path is predictable");
+                        rep(out, g303, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     }
                 }
             }
@@ -261,9 +267,7 @@ fn rule_paths(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                 var k = i + 2;
                 while k < tk_count && tk_line[k] == tk_line[i] {
                     if tk_kind[k] == TK_IDENT && tok_of(src, k) != "copy" {
-                        rep(out, 11, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]),
-                            "a file path comes from a variable");
+                        rep(out, g304, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                         break;
                     }
                     if tk_kind[k] == TK_OTHER && tok_of(src, k) == ")" { break; }
@@ -296,6 +300,9 @@ fn oct_value(text: const u8[:]) -> i64 {
 // mode above 0600 on a name that holds write is G306. A mode beside a
 // directory call is G301.
 fn rule_modes(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g301 = reg_must("G301");
+    let g302 = reg_must("G302");
+    let g306 = reg_must("G306");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_NUMBER {
@@ -320,18 +327,14 @@ fn rule_modes(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                 if call_k >= 0 { for b in tok_of(src, call_k) { call.push(b); } }
                 if world != 0 {
                     // B103 is the alias of G302, so one row reports it.
-                    rep(out, 9, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                        "file permissions are too wide");
+                    rep(out, g302, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                 } else if v > 384 {
                     if has_word(call[..], "write") || has_word(call[..], "append") {
-                        rep(out, 12, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]), "a write gets wide permissions");
+                        rep(out, g306, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     } else if has_word(call[..], "dir") {
-                        rep(out, 8, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]), "a directory gets wide permissions");
+                        rep(out, g301, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     } else {
-                        rep(out, 9, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]), "file permissions are too wide");
+                        rep(out, g302, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     }
                 }
             }

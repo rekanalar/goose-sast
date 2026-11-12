@@ -154,20 +154,19 @@ fn qual_is_weak_rand(src: const u8[:], i: i64) -> bool {
 // imported module reports too, when the module came from a weak hash
 // package.
 fn rule_weakhash(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g401 = reg_must("G401");
     read_imports(src);
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && is_call(src, i) {
             let name = tok_of(src, i);
             if is_weak_hash_name(name) {
-                rep(out, 13, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                    "a weak hash is in use");
+                rep(out, g401, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
             }
         } else if tk_kind[i] == TK_IDENT && qual_call(src, i)
             && qual_is_weak_hash(src, i) {
             // A call through the module name, as in md5::sum(data).
-            rep(out, 13, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                "a weak hash is in use");
+            rep(out, g401, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
         }
         i = i + 1;
     }
@@ -176,23 +175,21 @@ fn rule_weakhash(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
 // rule_weakrand runs G404: the non-crypto random calls of the standard
 // library, and a constant-seeded rng literal.
 fn rule_weakrand(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g404 = reg_must("G404");
     read_imports(src);
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT {
             let name = tok_of(src, i);
             if is_weak_rand_name(name) && is_call(src, i) {
-                rep(out, 14, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                    "a weak random source is in use");
+                rep(out, g404, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
             } else if name == "rng" && i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER
                 && tok_of(src, i + 1) == "{"
                 && i + 2 < tk_count && tk_kind[i + 2] == TK_NUMBER {
-                rep(out, 14, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                    "a weak random source is in use");
+                rep(out, g404, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
             } else if qual_call(src, i) && qual_is_weak_rand(src, i) {
                 // A call through the module name, as in rand::int(10).
-                rep(out, 14, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                    "a weak random source is in use");
+                rep(out, g404, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
             }
         }
         i = i + 1;
@@ -215,33 +212,33 @@ fn import_target(src: const u8[:], i: i64) -> const u8[:] {
     return "";
 }
 
-// import_block_target gives the blocklist rule index of the target.
-// It gives -1 when no row matches.
-fn import_block_target(target: const u8[:]) -> i64 {
+// import_block_target gives the ID of the gosec blocklist rule that the
+// target names. It gives an empty text when no row matches.
+fn import_block_target(target: const u8[:]) -> const u8[:] {
     var low: u8[>..] = [];
     lower_of(target, low);
-    if has_word(low[..], "md5") { return 21; }
-    if has_word(low[..], "des") { return 22; }
-    if has_word(low[..], "rc4") { return 23; }
-    if has_word(low[..], "cgi") { return 24; }
-    if has_word(low[..], "sha1") { return 25; }
-    if has_word(low[..], "md4") { return 26; }
-    if has_word(low[..], "ripemd160") { return 27; }
-    return -1;
+    if has_word(low[..], "md5") { return "G501"; }
+    if has_word(low[..], "des") { return "G502"; }
+    if has_word(low[..], "rc4") { return "G503"; }
+    if has_word(low[..], "cgi") { return "G504"; }
+    if has_word(low[..], "sha1") { return "G505"; }
+    if has_word(low[..], "md4") { return "G506"; }
+    if has_word(low[..], "ripemd160") { return "G507"; }
+    return "";
 }
 
-// import_bandit_target gives the rule index of the bandit import rows.
-// It gives -1 when no row matches.
-fn import_bandit_target(target: const u8[:]) -> i64 {
+// import_bandit_target gives the ID of the bandit blocklist rule that
+// the target names. It gives an empty text when no row matches.
+fn import_bandit_target(target: const u8[:]) -> const u8[:] {
     var low: u8[>..] = [];
     lower_of(target, low);
-    if has_word(low[..], "telnet") { return 28; }
-    if has_word(low[..], "ftp") { return 29; }
-    if has_word(low[..], "pickle") { return 30; }
-    if has_word(low[..], "process") { return 31; }
-    if has_word(low[..], "xmlrpc") { return reg_find("B411"); }
-    if has_word(low[..], "lxml") { return reg_find("B410"); }
-    return -1;
+    if has_word(low[..], "telnet") { return "B401"; }
+    if has_word(low[..], "ftp") { return "B402"; }
+    if has_word(low[..], "pickle") { return "B403"; }
+    if has_word(low[..], "process") { return "B404"; }
+    if has_word(low[..], "xmlrpc") { return "B411"; }
+    if has_word(low[..], "lxml") { return "B410"; }
+    return "";
 }
 
 // rule_blocklist runs G501 to G507 and B401 to B404, B410 and B411:
@@ -253,16 +250,12 @@ fn rule_blocklist(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
         if tk_kind[i] == TK_IDENT && tok_of(src, i) == "import" {
             let target = import_target(src, i);
             if target.len > 0 {
-                let g = import_block_target(target);
-                if g >= 0 {
-                    rep(out, g, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                        reg_msg_s[g]);
-                } else {
-                    let b = import_bandit_target(target);
-                    if b >= 0 {
-                        rep(out, b, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]), reg_msg_s[b]);
-                    }
+                // The gosec rows win over the bandit rows.
+                var id = import_block_target(target);
+                if id.len == 0 { id = import_bandit_target(target); }
+                if id.len > 0 {
+                    rep(out, reg_must(id), file_idx, tk_line[i],
+                        tok_col_of(src, tk_start[i]));
                 }
             }
         }

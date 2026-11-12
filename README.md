@@ -11,7 +11,7 @@ The package is a library and a command. The library scans a text or a tree and g
 A release holds one binary for each of Linux x64, macOS arm64 and Windows x64. The binary needs no Goose install and no C compiler.
 
 ```sh
-v=v0.15.0
+v=v0.16.0
 base=https://github.com/rekanalar/goose-sast/releases/download/$v
 curl -fsSLO $base/sast-linux-x64 -O $base/checksums.txt -O $base/checksums.txt.bundle
 sha256sum -c checksums.txt --ignore-missing
@@ -27,7 +27,7 @@ Upload the findings to code scanning with a step of six lines:
 
 ```yaml
 - run: |
-    curl -fsSLO https://github.com/rekanalar/goose-sast/releases/download/v0.15.0/sast-linux-x64
+    curl -fsSLO https://github.com/rekanalar/goose-sast/releases/download/v0.16.0/sast-linux-x64
     chmod +x sast-linux-x64 && ./sast-linux-x64 -f sarif -no-fail . > sast.sarif
 - uses: github/codeql-action/upload-sarif@v3
   with: { sarif_file: sast.sarif }
@@ -38,7 +38,7 @@ Run the tool before each commit with a `pre-commit` entry. The hook runs the `sa
 ```yaml
 repos:
   - repo: https://github.com/rekanalar/goose-sast
-    rev: v0.15.0
+    rev: v0.16.0
     hooks:
       - id: goose-sast
 ```
@@ -46,7 +46,7 @@ repos:
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.15.0";
+import sast from "rekanalar/goose-sast@v0.16.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -65,7 +65,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.15.0";
+import sast from "rekanalar/goose-sast@v0.16.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -110,6 +110,7 @@ fn main() {
 | `unused_text` | the rows of the unused report, one `path:line: unused suppression [ID]` per row; `scan_reset()` clears it |
 | `custom_reset()` | drops the custom rules of the run |
 | `reg_find(id) -> i64` | gives the registry index of an ID, or -1 |
+| `reg_must(id) -> i64` | gives the registry index of an exact ID; an alias gives no row and the run aborts |
 | `list_rules(out)` | writes one line per rule |
 | `format_text(findings, out)` | writes one line per finding |
 | `format_json(findings, scanned, skipped, out)` | writes one JSON object: the findings, the totals per severity and the file counts |
@@ -424,6 +425,8 @@ An import with no `@` is a local path, and the checks skip it.
 - A custom rule file may now use one of the nine removed IDs. The registry holds no such ID, so the file loads it as a new rule. Earlier releases rejected such a file.
 - B110 reported nothing in earlier releases, because the detector read a qualified name wrongly. It now reports a `try` call with an empty first block.
 - The precision number of the test run is a fixture number. Real code gives other results.
+- G116 reports the override and isolate controls U+202A to U+202E and U+2066 to U+2069, and the Arabic letter mark U+061C. It does not report the plain marks U+200E and U+200F. Right-to-left text holds them. A scan of one real package, with Arabic locale data, found 19 of them, so the rule leaves them out.
+- `reg_must` reads the ID only. An alias such as B105 names no row, so the run aborts and names the ID. A rule that names an ID that no row carries is a fault of this package, not of the caller.
 - The fingerprint of a finding is per tree layout. A project that moves its files writes a new baseline.
 - The hash of the fingerprint is FNV-1a 64 and it has no key. A line with a secret gives a hash that a reader can test guesses against. The baseline file of such a line holds a verifier for that secret.
 - A baseline file is not tamper-evident. An attacker who can change a baselined line can keep it hidden. Review the changes of a baseline file like the changes of the source.

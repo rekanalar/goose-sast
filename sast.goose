@@ -30,7 +30,7 @@ import rule_docs;
 
 // The version of the package. The SARIF driver reports it, and the README
 // import line names it.
-const VERSION: const u8[:] = "0.15.0";
+const VERSION: const u8[:] = "0.16.0";
 
 // The severity order. A finding with a lower severity than the option
 // does not print and does not set the exit code.
@@ -314,6 +314,22 @@ fn reg_find(s: const u8[:]) -> i64 {
         if al.len > 0 && alias_holds(al, s) { return i; }
         i = i + 1;
     }
+    return -1;
+}
+
+// reg_must gives the index of the row that carries exactly the ID s. It
+// reads no alias. A rule that names an ID that no row carries is a fault
+// of the program, so the call aborts and names the ID.
+fn reg_must(s: const u8[:]) -> i64 {
+    reg_ensure();
+    var i: i64 = 0;
+    while i < reg_id_s.len {
+        if reg_id_s[i] == s { return i; }
+        i = i + 1;
+    }
+    var m: u8[>..] = [];
+    format(m, "no rule carries the ID ", s);
+    abort(m[..]);
     return -1;
 }
 

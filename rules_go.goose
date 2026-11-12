@@ -5,6 +5,7 @@ namespace sast;
 // rule_cast runs G109: an `as!` cast whose target type is a smaller
 // integer type. G115 is the alias.
 fn rule_cast(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g109 = reg_must("G109");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && tok_of(src, i) == "as"
@@ -14,8 +15,7 @@ fn rule_cast(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
             let ty = tok_of(src, i + 2);
             if ty == "i8" || ty == "i16" || ty == "i32" || ty == "u8"
                 || ty == "u16" || ty == "u32" {
-                rep(out, 2, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                    "a narrowing cast may lose bits");
+                rep(out, g109, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
             }
         }
         i = i + 1;
@@ -25,32 +25,28 @@ fn rule_cast(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
 // rule_bidi runs G116: a bidirectional control character anywhere in
 // the source. B613 is the alias.
 fn rule_bidi(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let g116 = reg_must("G116");
     var i: i64 = 0;
     var line: i64 = 1;
     var col: i64 = 1;
     while i < src.len {
         let b = src[i];
-        // The bidi characters start with the byte 226 (0xE2) and sit in
-        // the ranges U+202A to U+202E and U+2066 to U+2069, plus the
-        // marks U+200E, U+200F and U+061C.
+        // The bidi controls start with the byte 226 (0xE2) and sit in the
+        // ranges U+202A to U+202E and U+2066 to U+2069. The Arabic letter
+        // mark U+061C also reports. The plain marks U+200E and U+200F do
+        // not report, because real right-to-left text holds them.
         if b == 226 && i + 2 < src.len {
             let m = src[i + 1];
             let l = src[i + 2];
             let marks = (m == 0x80 && l >= 0xAA && l <= 0xAE)
                 || (m == 0x81 && l >= 0xA6 && l <= 0xA9);
             if marks {
-                rep(out, 3, file_idx, line, col,
-                    "the source holds bidirectional control characters");
+                rep(out, g116, file_idx, line, col);
             }
         } else if b == 216 && i + 1 < src.len && src[i + 1] == 156
             && i + 2 < src.len && src[i + 2] >= 156 && src[i + 2] <= 159 {
             // U+061C, the Arabic letter mark, in 0xD8 0x9C to 0xD8 0x9F.
-            rep(out, 3, file_idx, line, col,
-                "the source holds bidirectional control characters");
-        } else if b == 226 && i + 2 < src.len && src[i + 1] == 0x80
-            && (src[i + 2] == 0x8E || src[i + 2] == 0x8F) {
-            rep(out, 3, file_idx, line, col,
-                "the source holds bidirectional control characters");
+            rep(out, g116, file_idx, line, col);
         }
         if b == 10 { line = line + 1; col = 1; } else { col = col + 1; }
         i = i + 1;
@@ -68,13 +64,13 @@ fn in_test_file(path: const u8[:]) -> bool {
 fn rule_assert(path: const u8[:], src: const u8[:],
                file_idx: i64, out: Finding[>..]&) {
     if in_test_file(path) { return; }
+    let b101 = reg_must("B101");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && tok_of(src, i) == "assert"
             && i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER
             && tok_of(src, i + 1) == "(" {
-            rep(out, 16, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                "an assert may be removed in a release build");
+            rep(out, b101, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
         }
         i = i + 1;
     }
@@ -84,6 +80,7 @@ fn rule_assert(path: const u8[:], src: const u8[:],
 // token. B112 is the alias. The lexer gives each colon as one token, so
 // the qualified name holds two.
 fn rule_emptycatch(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let b110 = reg_must("B110");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && tok_of(src, i) == "try"
@@ -101,9 +98,7 @@ fn rule_emptycatch(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                     // The block holds a token when the open sits before
                     // the close in the token list.
                     if opened + 1 == k {
-                        rep(out, 17, file_idx, tk_line[i],
-                            tok_col_of(src, tk_start[i]),
-                            "a catch body holds nothing");
+                        rep(out, b110, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     }
                     break;
                 }
@@ -116,6 +111,7 @@ fn rule_emptycatch(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
 
 // rule_timeout runs B113: a wait call whose time limit is a literal 0.
 fn rule_timeout(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let b113 = reg_must("B113");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && tok_of(src, i) == "wait"
@@ -138,9 +134,7 @@ fn rule_timeout(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                 }
                 if tk_kind[k] == TK_NUMBER && commas == 1 && depth == 0
                     && tok_of(src, k) == "0" {
-                    rep(out, 18, file_idx, tk_line[i],
-                        tok_col_of(src, tk_start[i]),
-                        "a wait takes no time limit");
+                    rep(out, b113, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                 }
                 k = k + 1;
             }
@@ -152,13 +146,12 @@ fn rule_timeout(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
 // rule_extern runs G103: an extern declaration binds code that the
 // type checker cannot see.
 fn rule_extern(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
-    let idx = reg_find("G103");
+    let idx = reg_must("G103");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && tok_of(src, i) == "extern"
             && i + 1 < tk_count && tk_kind[i + 1] == TK_STRING {
-            rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                "an extern function calls code outside the type checker");
+            rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
         }
         i = i + 1;
     }
@@ -167,7 +160,7 @@ fn rule_extern(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
 // rule_secretjson runs G117: a secret-named identifier on the line of
 // a call to a JSON writer.
 fn rule_secretjson(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
-    let idx = reg_find("G117");
+    let idx = reg_must("G117");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && tok_of(src, i) == "json"
@@ -178,8 +171,7 @@ fn rule_secretjson(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
             while k < tk_count && tk_line[k] == tk_line[i] {
                 if tk_kind[k] == TK_IDENT
                     && secret_class(tok_of(src, k)) != SECRET_NONE {
-                    rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                        "a secret-named value goes into a JSON writer");
+                    rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     break;
                 }
                 k = k + 1;
@@ -202,7 +194,7 @@ fn is_bool_call(name: const u8[:]) -> bool {
 // nobody reads. The result is dropped when the call sits alone on its
 // statement.
 fn rule_dropped(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
-    let idx = reg_find("G104");
+    let idx = reg_must("G104");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && is_bool_call(tok_of(src, i))
@@ -250,8 +242,7 @@ fn rule_dropped(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                 let next = tk_kind[end + 1];
                 let nxt = tok_of(src, end + 1);
                 if next == TK_OTHER && (nxt == ";" || nxt == ")" || nxt == ",") {
-                    rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                        "the result of the call is dropped");
+                    rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                 }
             }
         }
@@ -404,15 +395,14 @@ fn bound_check(src: const u8[:], name_tok: i64, num_tok: i64, neg: bool,
         if neg { outside = n != 0; }
     }
     if !outside { return; }
-    rep(out, idx, file_idx, tk_line[num_tok], tok_col_of(src, tk_start[num_tok]),
-        reg_msg_s[idx]);
+    rep(out, idx, file_idx, tk_line[num_tok], tok_col_of(src, tk_start[num_tok]));
 }
 
 // rule_bounds runs G602: a constant index that lies outside a fixed
 // array. The rule reads the length of the array from its declaration
 // and the index from the use.
 fn rule_bounds(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
-    let idx = reg_find("G602");
+    let idx = reg_must("G602");
     bound_reset();
     var i: i64 = 0;
     while i < tk_count {

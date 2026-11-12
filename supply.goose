@@ -207,7 +207,7 @@ fn check_supply(out: Finding[>..]&) -> i64 {
 // check_pins reports each import with a branch pin, and each import
 // with a tag pin when the policy asks for a commit pin.
 fn check_pins(root: const u8[:], out: Finding[>..]&) -> i64 {
-    let rule = reg_find(RULE_PIN);
+    let rule = reg_must(RULE_PIN);
     var found: i64 = 0;
     var i: i64 = 0;
     while i < dep_count() {
@@ -234,7 +234,7 @@ fn check_pins(root: const u8[:], out: Finding[>..]&) -> i64 {
 // package on the allow list stays out.
 fn check_cparts(root: const u8[:], out: Finding[>..]&) -> i64 {
     if !pol_cpart_report { return 0; }
-    let rule = reg_find(RULE_CPART);
+    let rule = reg_must(RULE_CPART);
     var found: i64 = 0;
     var i: i64 = 0;
     while i < dep_count() {

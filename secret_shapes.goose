@@ -48,10 +48,10 @@ fn shape_ensure() {
     if shape_ready { return; }
     reg_ensure();
     shape_rule = [];
-    shape_rule.push(reg_find("S101"));
-    shape_rule.push(reg_find("S102"));
-    shape_rule.push(reg_find("S103"));
-    shape_rule.push(reg_find("S104"));
+    shape_rule.push(reg_must("S101"));
+    shape_rule.push(reg_must("S102"));
+    shape_rule.push(reg_must("S103"));
+    shape_rule.push(reg_must("S104"));
     shape_re = [];
     var row: i64 = 0;
     while row < SHAPE_ROWS {
@@ -104,7 +104,7 @@ fn rule_shapes(src: const u8[:], file_idx: i64, out: Finding[>..]&) -> i64 {
         regex::each_match(rx, src) { s, e =>
             if found < MAX_FILE_MATCHES && shape_after_ok(src, e, this_row) {
                 let line, col = nl_pos(s + skip);
-                rep(out, idx, file_idx, line, col, reg_msg_s[idx]);
+                rep(out, idx, file_idx, line, col);
                 found = found + 1;
             }
         };
@@ -134,7 +134,7 @@ fn shape_head(src: const u8[:], file_idx: i64, out: Finding[>..]&, before: i64) 
                 if s == 0 && before + found < MAX_FILE_MATCHES
                     && shape_after_ok(src, e - 1, this_row) {
                     let line, col = nl_pos(0);
-                    rep(out, idx, file_idx, line, col, reg_msg_s[idx]);
+                    rep(out, idx, file_idx, line, col);
                     found = found + 1;
                 }
             };

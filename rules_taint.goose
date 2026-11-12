@@ -66,8 +66,8 @@ fn is_taint_sink(name: const u8[:]) -> bool {
 // source bound, and the scope that bound them.
 fn rule_taint(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     taint_reset();
-    let g702 = reg_find("G702");
-    let g703 = reg_find("G703");
+    let g702 = reg_must("G702");
+    let g703 = reg_must("G703");
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT {
@@ -98,7 +98,7 @@ fn rule_taint(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                     if tk_kind[k] == TK_IDENT && taint_live(tok_of(src, k), scope) {
                         var rule = g703;
                         if name == "run" || name == "spawn" { rule = g702; }
-                        rep(out, rule, file_idx, tk_line[i],
+                        rep_msg(out, rule, file_idx, tk_line[i],
                             tok_col_of(src, tk_start[i]),
                             "a value from an outside source reaches this call");
                         break;

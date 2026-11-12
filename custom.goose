@@ -298,8 +298,7 @@ fn run_custom(src: const u8[:], file_idx: i64, out: Finding[>..]&) -> i64 {
             var k: i64 = 0;
             while k < cr_kind.len {
                 if cr_kind[k] == CR_IDENT && cr_holds(k, word) {
-                    rep(out, cr_rule[k], file_idx, tk_line[i],
-                        tok_col_of(src, tk_start[i]), reg_msg_s[cr_rule[k]]);
+                    rep(out, cr_rule[k], file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     found = found + 1;
                 }
                 k = k + 1;
@@ -314,8 +313,7 @@ fn run_custom(src: const u8[:], file_idx: i64, out: Finding[>..]&) -> i64 {
             var k: i64 = 0;
             while k < cr_kind.len {
                 if cr_kind[k] == CR_STRING && cr_holds(k, word) {
-                    rep(out, cr_rule[k], file_idx, tk_line[i],
-                        tok_col_of(src, tk_start[i]), reg_msg_s[cr_rule[k]]);
+                    rep(out, cr_rule[k], file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     found = found + 1;
                 }
                 k = k + 1;
@@ -330,8 +328,7 @@ fn run_custom(src: const u8[:], file_idx: i64, out: Finding[>..]&) -> i64 {
             var k: i64 = 0;
             while k < cr_kind.len {
                 if cr_kind[k] == CR_COMMENT && cr_holds(k, word) {
-                    rep(out, cr_rule[k], file_idx, tk_line[i],
-                        tok_col_of(src, tk_start[i]), reg_msg_s[cr_rule[k]]);
+                    rep(out, cr_rule[k], file_idx, tk_line[i], tok_col_of(src, tk_start[i]));
                     found = found + 1;
                 }
                 k = k + 1;
@@ -367,8 +364,7 @@ fn run_custom(src: const u8[:], file_idx: i64, out: Finding[>..]&) -> i64 {
             let later_empty = e == s && s > 0;
             if !later_empty && found < MAX_FILE_MATCHES {
                 let line, col = nl_pos(s);
-                rep(out, cr_rule[slot], file_idx, line, col,
-                    reg_msg_s[cr_rule[slot]]);
+                rep(out, cr_rule[slot], file_idx, line, col);
                 found = found + 1;
             }
         };

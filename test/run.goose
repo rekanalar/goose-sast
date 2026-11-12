@@ -761,6 +761,152 @@ fn g602_lines(src: const u8[:], out: i64[>..]&) {
     for f in fs { if f.rule == want { out.push(f.line); } }
 }
 
+// The 37 sites that name a registry row. Each entry holds a source
+// text, the ID that the site must report, and the kind of the source.
+// A kind above 0 holds a bidirectional control character.
+var site_src: const u8[:][>..] = [];
+var site_id: const u8[:][>..] = [];
+var site_kind: i64[>..] = [];
+
+// site records one row of the table.
+fn site(src: const u8[:], id: const u8[:], kind: i64) {
+    site_src.push(src);
+    site_id.push(id);
+    site_kind.push(kind);
+}
+
+// bidi_src writes the source of a bidirectional control character into
+// the buffer.
+fn bidi_src(kind: i64, out: u8[>..]&) {
+    put(out, "let x = \"");
+    // The kind names the mark: 1 is U+202A, 2 is U+061C, 3 is U+200E
+    // and 4 is U+200F.
+    if kind == 1 { out.push(226); out.push(128); out.push(170); }
+    else if kind == 2 { out.push(216); out.push(156); out.push(156); }
+    else if kind == 3 { out.push(226); out.push(128); out.push(142); }
+    else { out.push(226); out.push(128); out.push(143); }
+    put(out, "\";\n");
+}
+
+// id_site_tests checks every site that names a registry row. The
+// finding must carry the ID of the row, and the severity, the
+// confidence and the CWE of that row.
+fn id_site_tests() {
+    site_src = [];
+    site_id = [];
+    site_kind = [];
+    // The credential and file rules.
+    site("let password = \"hunter2hunter2\";\n", "G101", 0);
+    site("listen(\"0.0.0.0\", p);\n", "G102", 0);
+    site("read_file(\"/\", out);\n", "G111", 0);
+    site("write_file(\"/tmp/x\", d);\n", "G303", 0);
+    site("read_file(p, out);\n", "G304", 0);
+    site("f(0o777);\n", "G302", 0);
+    site("write_file(\"a\", d, 0o644);\n", "G306", 0);
+    site("make_dir(\"d\", 0o755);\n", "G301", 0);
+    site("f(0o700);\n", "G302", 0);
+    // The crypto rules.
+    site("let h = md5(x);\n", "G401", 0);
+    site("md5::sum(data);\n", "G401", 0);
+    site("let r = rand_int(5);\n", "G404", 0);
+    site("let r = rng { 42 };\n", "G404", 0);
+    site("rand::int(10);\n", "G404", 0);
+    // The language rules.
+    site("let c = x as! i8;\n", "G109", 0);
+    site("", "G116", 1);
+    site("", "G116", 2);
+    site("assert(x > 0);\n", "B101", 0);
+    site("exception::try<u8[]>(load) { };\n", "B110", 0);
+    site("let w = wait(h, 0);\n", "B113", 0);
+    // The injection rules.
+    site("let a = \"select \" + str(x);\n", "G201", 0);
+    site("let a = \"select * from t where a=\" + x;\n", "G202", 0);
+    site("let h = \"<b>\" + name;\n", "G203", 0);
+    site("run(cmd, args);\n", "G204", 0);
+    site("run(\"ls\", args);\n", "B607", 0);
+    site("run(\"*\", a);\n", "B609", 0);
+    // The import rules.
+    site("import m from \"a/goose-md5@v1.0.0\";\n", "G501", 0);
+    site("import m from \"a/goose-des@v1.0.0\";\n", "G502", 0);
+    site("import m from \"a/goose-rc4@v1.0.0\";\n", "G503", 0);
+    site("import m from \"a/goose-cgi@v1.0.0\";\n", "G504", 0);
+    site("import m from \"a/goose-sha1@v1.0.0\";\n", "G505", 0);
+    site("import m from \"a/goose-md4@v1.0.0\";\n", "G506", 0);
+    site("import m from \"a/goose-ripemd160@v1.0.0\";\n", "G507", 0);
+    site("import m from \"a/goose-telnet@v1.0.0\";\n", "B401", 0);
+    site("import m from \"a/goose-ftp@v1.0.0\";\n", "B402", 0);
+    site("import m from \"a/goose-pickle@v1.0.0\";\n", "B403", 0);
+    site("import m from \"a/goose-process@v1.0.0\";\n", "B404", 0);
+    check(site_src.len == 37, "the table of the sites holds 37 rows");
+
+    var i: i64 = 0;
+    while i < site_src.len {
+        var idb: u8[>..] = [];
+        put(idb, site_id[i]);
+        let id = idb[..];
+        let want = sast::reg_find(id);
+        var buf: u8[>..] = [];
+        if site_kind[i] > 0 {
+            bidi_src(site_kind[i], buf);
+        } else {
+            put(buf, site_src[i]);
+        }
+        let src = buf[..];
+        var o = sast::default_options();
+        o.profile = sast::PROFILE_ALL;
+        var fs: sast::Finding[>..] = [];
+        sast::findings_reset();
+        sast::scan_text("src/a.goose", src, o, fs);
+        var found = false;
+        for f in fs {
+            if f.rule == want {
+                found = true;
+                check(f.sev == sast::reg_sev_s[want], "the severity of the site");
+                check(f.conf == sast::reg_conf_s[want], "the confidence of the site");
+                check(f.cwe == sast::reg_cwe_s[want], "the CWE of the site");
+                break;
+            }
+        }
+        var what: u8[>..] = [];
+        put(what, "a site reports under another ID: ");
+        put(what, id);
+        if site_kind[i] == 1 { put(what, " kind 1"); }
+        else if site_kind[i] == 2 { put(what, " kind 2"); }
+
+        check(found, what[..]);
+        i = i + 1;
+    }
+}
+
+// bidi_marks_tests checks that the plain marks U+200E and U+200F stay
+// silent, because right-to-left text holds them, and that the overrides
+// report.
+fn bidi_marks_tests() {
+    var b: u8[>..] = [];
+    bidi_src(3, b);
+    check(count_rule(b[..], "G116") == 0, "G116 keeps the mark U+200E");
+    var c: u8[>..] = [];
+    bidi_src(4, c);
+    check(count_rule(c[..], "G116") == 0, "G116 keeps the mark U+200F");
+    var d: u8[>..] = [];
+    bidi_src(1, d);
+    check(count_rule(d[..], "G116") == 1, "G116 reports the override U+202A");
+}
+
+// reg_must_tests checks the exact lookup over every rule of the
+// registry. It gives the index of the row that carries the ID.
+fn reg_must_tests() {
+    let n = sast::rule_count();
+    var i: i64 = 0;
+    while i < n {
+        check(sast::reg_must(sast::reg_id_s[i]) == i, "the exact lookup of a rule ID");
+        i = i + 1;
+    }
+    // An alias resolves for the user, and the exact lookup reads no
+    // alias.
+    check(sast::reg_find("B105") == sast::reg_find("G101"), "the alias B105 resolves to G101");
+}
+
 // The rules that left the registry and the constant index check.
 fn ledger_tests() {
     // The nine IDs that left the registry.
@@ -1830,6 +1976,9 @@ fn main() {
     baseline_tests();
     supply_tests();
     ledger_tests();
+    id_site_tests();
+    reg_must_tests();
+    bidi_marks_tests();
 
     if fails > 0 { abort("some checks failed"); }
     print("all sast checks pass");

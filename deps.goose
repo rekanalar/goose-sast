@@ -51,7 +51,7 @@ fn dep_msg(out: u8[>..]&, name: const u8[:], tag: const u8[:], why: const u8[:])
 // check_bans runs the ban check over the manifest. A banned package
 // and a package in a banned range each report one finding.
 fn check_bans(out: Finding[>..]&) -> i64 {
-    let rule = reg_find(RULE_BAN);
+    let rule = reg_must(RULE_BAN);
     var found: i64 = 0;
     var i: i64 = 0;
     while i < dep_count() {
@@ -80,7 +80,7 @@ fn check_bans(out: Finding[>..]&) -> i64 {
 // with no licence is a finding when the policy demands one. A licence
 // that is not on the allow list is a finding.
 fn check_licences(out: Finding[>..]&) -> i64 {
-    let rule = reg_find(RULE_LICENCE);
+    let rule = reg_must(RULE_LICENCE);
     var found: i64 = 0;
     var i: i64 = 0;
     while i < dep_count() {
@@ -109,7 +109,7 @@ fn check_licences(out: Finding[>..]&) -> i64 {
 // is not on the allow list is a finding. An empty allow list allows
 // every source.
 fn check_sources(out: Finding[>..]&) -> i64 {
-    let rule = reg_find(RULE_SOURCE);
+    let rule = reg_must(RULE_SOURCE);
     var found: i64 = 0;
     if pol_src_at.len == 0 { return 0; }
     var i: i64 = 0;
@@ -132,7 +132,7 @@ fn check_sources(out: Finding[>..]&) -> i64 {
 // advisory whose package and range cover the pinned tag reports one
 // finding. An advisory on the ignore list of the policy stays out.
 fn check_advisories(out: Finding[>..]&) -> i64 {
-    let rule = reg_find(RULE_ADVISORY);
+    let rule = reg_must(RULE_ADVISORY);
     var found: i64 = 0;
     var i: i64 = 0;
     while i < dep_count() {
