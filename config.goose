@@ -33,27 +33,34 @@ fn config_bad(err: u8[>..]&, key: const u8[:], want: const u8[:]) {
     format(err, "the config key ", key, " takes ", want, "\n");
 }
 
-// config_ids applies a list of rule IDs. The list holds IDs that
-// commas separate. An ID that no rule carries is a fault that names
-// the key.
-fn config_ids(list: const u8[:], key: const u8[:], excl: bool,
-              err: u8[>..]&) -> bool {
+// split_list splits a list of IDs or paths on commas. An empty part
+// stays out. The parts point into the text of the caller.
+fn split_list(list: const u8[:], out: const u8[:][>..]&) {
     var at: i64 = 0;
     var i: i64 = 0;
-    while i <= list.len {
-        if i == list.len || list[i] == 44 {
-            if i > at {
-                let id = list[at..i];
-                if reg_find(id) < 0 {
-                    format(err, "the config key ", key, " holds the ID ",
-                        id, " that no rule carries\n");
-                    return false;
-                }
-                if excl { opt_exclude(id); } else { opt_include(id); }
-            }
+    while i < list.len {
+        if list[i] == 44 {
+            if i > at { out.push(list[at..i]); }
             at = i + 1;
         }
         i = i + 1;
+    }
+    if list.len > at { out.push(list[at..list.len]); }
+}
+
+// apply_ids applies a list of rule IDs. The list holds IDs that
+// commas separate. An ID that no rule carries is a fault.
+fn apply_ids(list: const u8[:], excl: bool, err: u8[>..]&) -> bool {
+    var parts: const u8[:][>..] = [];
+    split_list(list, parts);
+    var k: i64 = 0;
+    while k < parts.len {
+        if reg_find(parts[k]) < 0 {
+            format(err, "no rule carries the ID ", parts[k], "\n");
+            return false;
+        }
+        if excl { opt_exclude(parts[k]); } else { opt_include(parts[k]); }
+        k = k + 1;
     }
     return true;
 }
@@ -61,14 +68,12 @@ fn config_ids(list: const u8[:], key: const u8[:], excl: bool,
 // config_paths applies a list of path parts. The list holds parts that
 // commas separate.
 fn config_paths(list: const u8[:]) {
-    var at: i64 = 0;
-    var i: i64 = 0;
-    while i <= list.len {
-        if i == list.len || list[i] == 44 {
-            if i > at { opt_skip_path(list[at..i]); }
-            at = i + 1;
-        }
-        i = i + 1;
+    var parts: const u8[:][>..] = [];
+    split_list(list, parts);
+    var k: i64 = 0;
+    while k < parts.len {
+        opt_skip_path(parts[k]);
+        k = k + 1;
     }
 }
 
@@ -85,6 +90,25 @@ fn cfg_str(r: json::Reader&, scratch: u8[>..]&, key: const u8[:],
     return v, true;
 }
 
+// The largest number that the config file may hold for a bound. The
+// flags of the command take no more than nine digits, so the file
+// takes no more either.
+const CFG_MAX_NUM: i64 = 999999999;
+
+// cfg_list reads the value of a key that holds a string of parts. It
+// appends the bytes to out unless a flag of the command line owns the
+// key. A value of the wrong shape is a fault that names the key.
+fn cfg_list(r: json::Reader&, scratch: u8[>..]&, key: const u8[:],
+            want: const u8[:], bit: i64, mask: i64, out: u8[>..]&,
+            err: u8[>..]&) -> bool {
+    let v, ok = cfg_str(r, scratch, key, want, err);
+    if !ok { return false; }
+    if (mask & bit) == 0 {
+        for b in v { out.push(b); }
+    }
+    return true;
+}
+
 // cfg_num reads the value of a key that holds a number. It gives the
 // value and whether the read was good. A value of another shape is a
 // fault that names the key.
@@ -94,7 +118,27 @@ fn cfg_num(r: json::Reader&, key: const u8[:], err: u8[>..]&) -> i64, bool {
         config_bad(err, key, "a number");
         return 0, false;
     }
+    if v > CFG_MAX_NUM {
+        config_bad(err, key, "a number of at most nine digits");
+        return 0, false;
+    }
     return v, true;
+}
+
+// config_bit gives the bit of a key of the config file. It gives 0
+// for a key that the file does not know.
+fn config_bit(key: const u8[:]) -> i64 {
+    if key == "min_severity" { return CFG_SEV; }
+    if key == "min_confidence" { return CFG_CONF; }
+    if key == "exclude" { return CFG_EXCL; }
+    if key == "include" { return CFG_INCL; }
+    if key == "exclude_path" { return CFG_PATH; }
+    if key == "max_files" { return CFG_FILES; }
+    if key == "max_depth" { return CFG_DEPTH; }
+    if key == "policy" { return CFG_POLICY; }
+    if key == "advisories" { return CFG_ADV; }
+    if key == "rules" { return CFG_RULES; }
+    return 0;
 }
 
 // read_config reads the text of a config file. It fills the options
@@ -115,83 +159,76 @@ fn read_config(text: const u8[:], mask: i64, o: Options&,
     var excl: u8[>..] = [];
     var incl: u8[>..] = [];
     var paths: u8[>..] = [];
+    // The bits of the keys that the file held. A key that comes twice
+    // is a fault that names the key.
+    var seen: i64 = 0;
     json::each_member(r) { key =>
+        let bit = config_bit(key);
+        if (seen & bit) != 0 {
+            format(err, "the config key ", key, " appears twice\n");
+            return false;
+        }
+        seen = seen | bit;
         if key == "min_severity" {
             let v, ok = cfg_str(r, scratch, "min_severity", "a name", err);
             if !ok {
                 bad = true;
-            } else if (mask & CFG_SEV) == 0 {
+            } else {
                 let lvl = sev_of_name(v);
                 if lvl < 0 {
                     config_bad(err, "min_severity",
                         "low, medium, high or critical");
                     bad = true;
-                } else { sev = lvl; }
+                } else if (mask & bit) == 0 { sev = lvl; }
             }
         } else if key == "min_confidence" {
             let v, ok = cfg_str(r, scratch, "min_confidence", "a name", err);
             if !ok {
                 bad = true;
-            } else if (mask & CFG_CONF) == 0 {
+            } else {
                 let lvl = conf_of_name(v);
                 if lvl < 0 {
                     config_bad(err, "min_confidence", "low, medium or high");
                     bad = true;
-                } else { conf = lvl; }
+                } else if (mask & bit) == 0 { conf = lvl; }
             }
         } else if key == "exclude" {
-            let v, ok = cfg_str(r, scratch, "exclude", "a list of rule IDs", err);
-            if !ok {
-                bad = true;
-            } else if (mask & CFG_EXCL) == 0 {
-                for b in v { excl.push(b); }
-            }
+            if !cfg_list(r, scratch, "exclude", "a list of rule IDs", bit,
+                         mask, excl, err) { bad = true; }
         } else if key == "include" {
-            let v, ok = cfg_str(r, scratch, "include", "a list of rule IDs", err);
-            if !ok {
-                bad = true;
-            } else if (mask & CFG_INCL) == 0 {
-                for b in v { incl.push(b); }
-            }
+            if !cfg_list(r, scratch, "include", "a list of rule IDs", bit,
+                         mask, incl, err) { bad = true; }
         } else if key == "exclude_path" {
-            let v, ok = cfg_str(r, scratch, "exclude_path",
-                "a list of path parts", err);
-            if !ok {
-                bad = true;
-            } else if (mask & CFG_PATH) == 0 {
-                for b in v { paths.push(b); }
-            }
+            if !cfg_list(r, scratch, "exclude_path", "a list of path parts",
+                         bit, mask, paths, err) { bad = true; }
         } else if key == "policy" {
-            let v, ok = cfg_str(r, scratch, "policy", "a path", err);
-            if !ok {
-                bad = true;
-            } else if (mask & CFG_POLICY) == 0 {
-                for b in v { policy.push(b); }
-            }
+            if !cfg_list(r, scratch, "policy", "a path", bit, mask, policy,
+                         err) { bad = true; }
         } else if key == "advisories" {
-            let v, ok = cfg_str(r, scratch, "advisories", "a path", err);
-            if !ok {
-                bad = true;
-            } else if (mask & CFG_ADV) == 0 {
-                for b in v { adv.push(b); }
-            }
+            if !cfg_list(r, scratch, "advisories", "a path", bit, mask, adv,
+                         err) { bad = true; }
         } else if key == "rules" {
-            let v, ok = cfg_str(r, scratch, "rules", "a list of paths", err);
-            if !ok {
-                bad = true;
-            } else if (mask & CFG_RULES) == 0 {
-                for b in v { rules.push(b); }
-            }
+            // The rule files of the config file join the rule files of
+            // the command line. The merge of the rule files is the rule
+            // of the package.
+            if !cfg_list(r, scratch, "rules", "a list of paths", 0, mask,
+                         rules, err) { bad = true; }
         } else if key == "max_files" {
             let v, ok = cfg_num(r, "max_files", err);
             if !ok {
                 bad = true;
-            } else if (mask & CFG_FILES) == 0 { files = v; }
+            } else if v < 0 {
+                config_bad(err, "max_files", "a number of files");
+                bad = true;
+            } else if (mask & bit) == 0 { files = v; }
         } else if key == "max_depth" {
             let v, ok = cfg_num(r, "max_depth", err);
             if !ok {
                 bad = true;
-            } else if (mask & CFG_DEPTH) == 0 { depth = v; }
+            } else if v < 0 {
+                config_bad(err, "max_depth", "a number of levels");
+                bad = true;
+            } else if (mask & bit) == 0 { depth = v; }
         } else {
             format(err, "the config file holds the unknown key ", key, "\n");
             bad = true;
@@ -207,12 +244,8 @@ fn read_config(text: const u8[:], mask: i64, o: Options&,
     if conf >= 0 { o.min_confidence = conf; }
     if files >= 0 { o.max_files = files; }
     if depth >= 0 { o.max_depth = depth; }
-    if excl.len > 0 && !config_ids(excl[..], "exclude", true, err) {
-        return false;
-    }
-    if incl.len > 0 && !config_ids(incl[..], "include", false, err) {
-        return false;
-    }
+    if excl.len > 0 && !apply_ids(excl[..], true, err) { return false; }
+    if incl.len > 0 && !apply_ids(incl[..], false, err) { return false; }
     if paths.len > 0 { config_paths(paths[..]); }
     return true;
 }

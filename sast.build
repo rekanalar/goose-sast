@@ -1,5 +1,6 @@
 // The sidecar of the sast package.
 //
-// The C part holds the one call that tells a symbolic link from a
-// directory. The walk of the scanner skips a link.
+// The C part holds two calls. One tells a symbolic link from a
+// directory, and the walk of the scanner skips a link. One gives the
+// size of a regular file, so the scanner reads no pipe and no device.
 c_sources = ["src/walk.c"];

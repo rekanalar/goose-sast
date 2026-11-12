@@ -452,6 +452,64 @@ fn main() {
     check(!sast::read_config(cbad4[..], 0, co2, cpol2, cadv2, crules2, cberr4), "an unknown rule ID faults");
     check(cberr4.len > 0, "the fault names the key");
 
+    // A bad value of the config file is a fault even when a flag owns
+    // the setting.
+    var co3 = sast::default_options();
+    var cp3: u8[>..] = [];
+    var ca3: u8[>..] = [];
+    var cr3: u8[>..] = [];
+    var ce3: u8[>..] = [];
+    var bt: u8[>..] = [];
+    for c in "{ \"min_severity\": \"huge\" }" { bt.push(c); }
+    check(!sast::read_config(bt[..], sast::CFG_SEV, co3, cp3, ca3, cr3, ce3), "a bad severity faults under a flag");
+    // A negative bound is a fault.
+    var nb: u8[>..] = [];
+    var ne: u8[>..] = [];
+    for c in "{ \"max_files\": -5 }" { nb.push(c); }
+    check(!sast::read_config(nb[..], 0, co3, cp3, ca3, cr3, ne), "a negative file bound faults");
+    check(ne.len > 0, "the fault names the key");
+    // The confidence names are low, medium and high.
+    check(sast::conf_of_name("critical") < 0, "critical is no confidence");
+    check(sast::conf_of_name("high") == sast::CONF_HIGH, "high is a confidence");
+    // The comma splitter drops an empty part.
+    var parts: const u8[:][>..] = [];
+    sast::split_list(",a,,b,", parts);
+    check(parts.len == 2 && parts[0] == "a" && parts[1] == "b", "the splitter drops empty parts");
+    // A key that the file holds twice is a fault.
+    var dupkey: u8[>..] = [];
+    for c in "{ \"min_severity\": \"low\", \"min_severity\": \"high\" }" { dupkey.push(c); }
+    var dke: u8[>..] = [];
+    check(!sast::read_config(dupkey[..], 0, co3, cp3, ca3, cr3, dke), "a key that comes twice faults");
+    check(dke.len > 0, "the fault names the key");
+    // A bound of more than nine digits is a fault.
+    var big: u8[>..] = [];
+    for c in "{ \"max_files\": 1234567890 }" { big.push(c); }
+    var bge: u8[>..] = [];
+    check(!sast::read_config(big[..], 0, co3, cp3, ca3, cr3, bge), "a bound of ten digits faults");
+    check(bge.len > 0, "the fault names the key");
+
+    // A file that is no regular file is not read.
+    var rb: u8[>..] = [];
+    check(!sast::read_bounded("test", 1024, rb), "a directory is no regular file");
+    check(!sast::read_bounded("test/run.goose", 4, rb), "a file above the bound is not read");
+    var okb: u8[>..] = [];
+    check(sast::read_bounded("test/run.goose", 1000000, okb), "a regular file reads");
+    check(okb.len > 0, "the read holds the bytes");
+
+    // A rule file that faults leaves the registry as it was.
+    var cr3: u8[>..] = [];
+    read_file("test/custom/rules.json", cr3);
+    var ce2: u8[>..] = [];
+    check(sast::read_custom(cr3[..], ce2), "the rule file parses");
+    let before_fault = sast::rule_count();
+    var badrules: u8[>..] = [];
+    for c in "{ \"rules\": [{\"id\":\"CO900\",\"severity\":\"low\",\"kind\":\"ident\",\"text\":\"aa\"},{\"id\":\"CO901\",\"severity\":\"nope\",\"kind\":\"ident\",\"text\":\"bb\"}] }" { badrules.push(c); }
+    var bre: u8[>..] = [];
+    check(!sast::read_custom_more(badrules[..], bre), "a bad rule faults");
+    check(sast::rule_count() == before_fault, "the faulty file leaves the registry as it was");
+    check(sast::reg_find("CO900") < 0, "the faulty file leaves no rule");
+    sast::custom_reset();
+
     if fails > 0 { abort("some checks failed"); }
     print("all sast checks pass");
 }

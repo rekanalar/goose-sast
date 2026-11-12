@@ -187,6 +187,27 @@ jobs:
           "$RUNNER_TEMP/sast" -no-fail -max-files 1 "$RUNNER_TEMP/t1" "$RUNNER_TEMP/t2" > out.txt
           grep -q "1 file(s) scanned" out.txt
           grep -q "1 file(s) skipped" out.txt
+          # A directory that two targets name is walked once.
+          "$RUNNER_TEMP/sast" -no-fail "$RUNNER_TEMP/t2" "$RUNNER_TEMP/t2" > out.txt
+          grep -q "1 file(s) scanned" out.txt
+          grep -q "1 file(s) skipped" out.txt
+          # The file count bound covers a file target too.
+          "$RUNNER_TEMP/sast" -no-fail -max-files 1 "$RUNNER_TEMP/t2/y.goose" "$RUNNER_TEMP/t1/x.goose" > out.txt
+          grep -q "1 file(s) scanned" out.txt
+          grep -q "1 file(s) skipped" out.txt
+          # The confidence flag takes low, medium or high.
+          set +e
+          "$RUNNER_TEMP/sast" -confidence critical "$RUNNER_TEMP/t1" 2> /dev/null
+          code=$?
+          set -e
+          test "$code" = 2
+          # A bad value of the config file is a fault under a flag too.
+          printf '{ "min_severity": "huge" }\n' > "$RUNNER_TEMP/huge.json"
+          set +e
+          "$RUNNER_TEMP/sast" -config "$RUNNER_TEMP/huge.json" -severity low "$RUNNER_TEMP/t1" 2> /dev/null
+          code=$?
+          set -e
+          test "$code" = 2
           # The config file names the rule files and the policy file.
           # The path in the file holds no backslash, because a
           # backslash is an escape in JSON and the path of the runner
@@ -223,6 +244,55 @@ jobs:
           code=$?
           set -e
           test "$code" = 2
+          # A file that is no regular file is not read. A pipe as a
+          # target ends the run at once, and a device as a rule file is
+          # a fault. Windows has no pipe and no device of this kind.
+          if [ "${RUNNER_OS:-Linux}" != "Windows" ]; then
+            mkfifo "$RUNNER_TEMP/pipe"
+            set +e
+            "$RUNNER_TEMP/sast" "$RUNNER_TEMP/pipe" 2> /dev/null
+            code=$?
+            set -e
+            test "$code" = 2
+            printf '{ "rules": "/dev/zero" }\n' > "$RUNNER_TEMP/dev.json"
+            set +e
+            "$RUNNER_TEMP/sast" -config "$RUNNER_TEMP/dev.json" "$RUNNER_TEMP/t1" 2> /dev/null
+            code=$?
+            set -e
+            test "$code" = 2
+          fi
+          # A hostile byte in a fault message is escaped. The key holds
+          # the UTF-8 form of a C1 control.
+          printf '{ "\xc2\x9b": 1 }\n' > "$RUNNER_TEMP/c1.json"
+          set +e
+          "$RUNNER_TEMP/sast" -config "$RUNNER_TEMP/c1.json" "$RUNNER_TEMP/t1" 2> err.txt
+          code=$?
+          set -e
+          test "$code" = 2
+          grep -q 'xc2' err.txt
+          if LC_ALL=C grep -q "$(printf '\xc2\x9b')" err.txt; then echo "raw C1 byte in the fault message"; exit 1; fi
+          # A key that the config file holds twice is a fault.
+          printf '{ "min_severity": "low", "min_severity": "high" }\n' > "$RUNNER_TEMP/dup.json"
+          set +e
+          "$RUNNER_TEMP/sast" -config "$RUNNER_TEMP/dup.json" "$RUNNER_TEMP/t1" 2> /dev/null
+          code=$?
+          set -e
+          test "$code" = 2
+          # The command reads no config file of the current directory
+          # when the -no-config flag names that choice.
+          printf '{ "min_severity": "critical" }\n' > .goose-sast.json
+          "$RUNNER_TEMP/sast" -no-fail "$RUNNER_TEMP/t2" > out.txt
+          if grep -q "G101" out.txt; then echo "the config file of the directory was not read"; exit 1; fi
+          "$RUNNER_TEMP/sast" -no-fail -no-config "$RUNNER_TEMP/t2" > out.txt
+          grep -q "G101" out.txt
+          rm -f .goose-sast.json
+          # The rule files of the config file join the rule files of the
+          # command line.
+          printf '{ "rules": "ci-rules.json" }\n' > ci-config2.json
+          "$RUNNER_TEMP/sast" -no-fail -config ci-config2.json \
+            -rules "$RUNNER_TEMP/r1.json" "$RUNNER_TEMP/t1" > out.txt
+          grep -q "HA01" out.txt
+          grep -q "HA02" out.txt
         env:
           GOOSE_HOME: ${{ runner.temp }}/goose-home
 

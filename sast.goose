@@ -43,6 +43,7 @@ const MAX_FILES: i64 = 4096;
 const MAX_DEPTH: i64 = 64;
 const MAX_FINDINGS: i64 = 65536;
 
+
 // Finding is one reported defect. Every field is fixed size, so a list
 // of findings is a plain array the caller owns.
 struct Finding {
@@ -135,7 +136,8 @@ var buf_texts: u8[>..] = [];
 var buf_paths: u8[>..] = [];
 var buf_path_off: i64[>..] = [];
 
-// findings_reset empties the buffers of the store.
+// findings_reset empties the buffers of the store. A run calls it
+// through scan_reset, which clears every state that one run holds.
 fn findings_reset() {
     buf_texts.resize(0, 0);
     buf_paths.resize(0, 0);

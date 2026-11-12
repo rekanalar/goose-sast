@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.7.1";
+import sast from "rekanalar/goose-sast@v0.7.2";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.7.1";
+import sast from "rekanalar/goose-sast@v0.7.2";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -60,6 +60,10 @@ fn main() {
 | `read_custom(text, err) -> bool` | reads a custom rule file; false on a fault |
 | `read_custom_more(text, err) -> bool` | adds the rules of a rule file to the rules of the run |
 | `read_config(text, mask, options, policy, advisories, rules, err) -> bool` | reads a config file; false on a fault |
+| `split_list(list, out)` | splits a list on commas and leaves out the empty parts |
+| `scan_dir_budget(dir, options, out, budget) -> i64, i64` | scans a tree against a file budget that several trees share; the caller sorts the findings |
+| `scan_reset()` | clears the state of one run: the list of the walked directories, the finding store and the bound flag. A run calls it once before it scans |
+| `read_bounded(path, max, out) -> bool` | reads a regular file of at most max bytes; false for a pipe, a device, a directory and a file that is too large |
 | `custom_reset()` | drops the custom rules of the run |
 | `reg_find(id) -> i64` | gives the registry index of an ID, or -1 |
 | `list_rules(out)` | writes one line per rule |
@@ -82,15 +86,27 @@ fn main() {
 | `-max-files N` | the files the walk reads |
 | `-rules FILE` | loads custom rules from this file; the flag takes several files |
 | `-config FILE` | reads the settings of the run from this file |
+| `-no-config` | reads no config file of the current directory |
 | `-policy FILE` | runs the dependency checks with this policy |
 | `-advisories FILE` | runs the advisory check with this file |
 | `-quiet` | prints nothing; the exit code stays |
 | `-no-fail` | always exits 0 |
 | `-list-rules` | prints the rule list |
 
-The command takes several targets. It scans each target in turn. A directory target runs the walk and a file target runs the text scan. The summary line counts the files of all targets.
+The command takes several targets. It scans each target in turn. A directory target runs the walk and a file target runs the text scan. The summary line counts the files of all targets. A directory that two targets name by the same bytes is walked once. The dependency checks read the first target that is a file.
 
 The exit code is 0 with no finding, 1 with findings and 2 when the scan fails.
+
+The dependency checks set the exit code to the bitset of cargo-deny.
+
+| Bit | Break |
+|---|---|
+| 1 | an advisory |
+| 2 | a banned package |
+| 4 | a denied licence |
+| 8 | a denied source |
+
+A run with a banned package and no other finding exits 2, the code of a failed scan. A run with an advisory and no other finding exits 1, the code of a finding.
 
 ## Config file
 
@@ -124,7 +140,13 @@ A config file holds the settings of a run. The command reads the file `.goose-sa
 | `max_files` | a whole number |
 | `max_depth` | a whole number |
 
-A flag of the command line wins over the value of the file. A file that does not parse is a fault. A key that the command does not know is a fault. The fault names the key and the run ends with exit code 2.
+A flag of the command line wins over the value of the file. The command checks every value of the file, also the values that a flag replaces.
+
+A file that does not parse is a fault. A negative bound is a fault. A bound of more than nine digits is a fault. A key that the command does not know is a fault. A key that the file holds twice is a fault. The fault names the key and the run ends with exit code 2.
+
+The rule files of the config file join the rule files of the `-rules` flag. The merge of the rule files is the rule of the package.
+
+The command reads the file `.goose-sast.json` of the current directory. A checkout that holds that file sets the settings of the run. A CI job that scans an untrusted checkout should pass `-no-config` or name its own file with the `-config` flag.
 
 ## Suppression
 
@@ -158,7 +180,7 @@ A file of custom rules adds rules without a change to the package. The file is J
 | `exact` | true matches the whole token; false matches a part |
 | `message` | the message of the finding |
 
-A custom rule joins the registry. The filters, the suppressions and the exit code treat it like a built-in rule. Several `-rules` files merge. The rules of each file join the rules of the earlier files. A rule ID that two files hold is a fault that names the ID.
+A custom rule joins the registry. The filters, the suppressions and the exit code treat it like a built-in rule. Several `-rules` files merge. The rules of each file join the rules of the earlier files. A rule ID that two files hold is a fault that names the ID. A file that faults leaves the rules of the run as they were.
 
 ## Rules
 
@@ -207,7 +229,11 @@ The dependency checks report under their own IDs.
 - The `sast` command takes several targets. The file count bound covers the whole run. The depth bound applies to each tree.
 - The config file sits in the current directory. The command does not walk up the tree to find it.
 - The rule IDs of a config file and of a flag name the built-in rules. The custom rules load after the lists, so a custom rule ID does not work there.
-- The dependency checks read the first target of a run.
+- The walk compares the bytes of a path. The targets `a` and `./a` name one directory, and the walk reads it twice. The standard library has no canonical path call.
+- The dependency checks read the first target that is a file. A run with only directories leaves them out.
+- A `-exclude` or `-include` flag with an empty value still replaces the list of the config file.
+- The exit code of the dependency checks shares its values with the exit codes of the scan. A caller that needs to tell the two apart reads the output.
+- The command reads the file `.goose-sast.json` of the current directory. A checkout that holds that file sets the settings of the run.
 
 ## Security
 
@@ -219,3 +245,6 @@ The dependency checks report under their own IDs.
 - A file that the scan cannot read counts as skipped. The summary line shows the count, so a skipped file never hides.
 - The scan runs no code from the files it reads.
 - The config file is read once per run. Its size is bounded like the size of a source file. A file that does not parse is a fault, never a silent default.
+- The command reads no pipe, no device and no directory. A file that is no regular file ends the run with exit code 2. The size of a file is read before its bytes, so a file above the bound never reaches the memory.
+- The count of the findings of a run is bounded at 65536. A run that reaches the bound says so on the error output. The count in the summary is then a lower bound.
+- The messages of a fault write each byte outside printable ASCII as `\xNN`, except the newline. A hostile name in a config file or a rule file cannot inject a control sequence. A C1 control is safe too.

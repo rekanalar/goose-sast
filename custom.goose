@@ -42,20 +42,29 @@ var cr_base: i64 = -1;
 fn custom_reset() {
     reg_ensure();
     if cr_base < 0 { cr_base = reg_id_s.len; }
-    if reg_id_s.len > cr_base {
-        reg_id_s.resize(cr_base, "");
-        reg_sev_s.resize(cr_base, 0);
-        reg_conf_s.resize(cr_base, 0);
-        reg_cwe_s.resize(cr_base, 0);
-        reg_alias_s.resize(cr_base, "");
-        reg_msg_s.resize(cr_base, "");
-    }
+    custom_cut(cr_base, 0);
     cr_buf.resize(0, 0);
-    cr_kind.resize(0, 0);
-    cr_exact.resize(0, false);
-    cr_text_at.resize(0, 0);
-    cr_text_end.resize(0, 0);
-    cr_rule.resize(0, 0);
+}
+
+// custom_cut cuts the registry to reg_len rows and the custom rule
+// lists to cr_len rules. custom_reset uses it for a fresh run and
+// custom_undo uses it for a file that faults.
+fn custom_cut(reg_len: i64, cr_len: i64) {
+    if reg_id_s.len > reg_len {
+        reg_id_s.resize(reg_len, "");
+        reg_sev_s.resize(reg_len, 0);
+        reg_conf_s.resize(reg_len, 0);
+        reg_cwe_s.resize(reg_len, 0);
+        reg_alias_s.resize(reg_len, "");
+        reg_msg_s.resize(reg_len, "");
+    }
+    cr_kind.resize(cr_len, 0);
+    cr_exact.resize(cr_len, false);
+    cr_text_at.resize(cr_len, 0);
+    cr_text_end.resize(cr_len, 0);
+    cr_rule.resize(cr_len, 0);
+    // The byte buffers keep the bytes of a failed file. The registry
+    // holds no slice into them any more, so no rule uses them.
 }
 
 // cr_push copies one text into the custom buffer and gives its range.
@@ -88,6 +97,10 @@ fn read_custom(text: const u8[:], err: u8[>..]&) -> bool {
 fn read_custom_more(text: const u8[:], err: u8[>..]&) -> bool {
     reg_ensure();
     if cr_base < 0 { cr_base = reg_id_s.len; }
+    // The state before the file. A file that faults leaves the registry
+    // as it was.
+    let reg_len = reg_id_s.len;
+    let cr_len = cr_kind.len;
     var scratch: u8[>..] = [];
     var r = json::reader(text);
     var bad: u8[>..] = [];
@@ -103,10 +116,12 @@ fn read_custom_more(text: const u8[:], err: u8[>..]&) -> bool {
         };
     }
     if bad.len > 0 {
+        custom_cut(reg_len, cr_len);
         for b in bad { err.push(b); }
         return false;
     }
     if !json::finish(r) {
+        custom_cut(reg_len, cr_len);
         for b in json::message(r) { err.push(b); }
         return false;
     }

@@ -12,6 +12,9 @@ fn ends_with(s: const u8[:], suffix: const u8[:]) -> bool {
     return s[s.len - suffix.len..s.len] == suffix;
 }
 
+// The flag that says that the run reached the bound of the findings.
+var findings_hit_cap = false;
+
 // The block suppressions of the file. Each range holds a first line, a
 // last line and the rule it silences. A rule of -1 silences every rule.
 var supp_from: i64[>..] = [];
@@ -281,6 +284,12 @@ fn scan_text(path: const u8[:], src: const u8[:], o: Options, out: Finding[>..]&
             continue;
         }
         if keep(o, f.rule, f.sev, f.conf) {
+            // The count of the findings of a run is bounded. A file
+            // that matches a rule on every line cannot fill the memory.
+            if out.len >= MAX_FINDINGS {
+                findings_hit_cap = true;
+                break;
+            }
             out.push(f);
             kept = kept + 1;
         }
@@ -385,8 +394,8 @@ fn scan_walk(o: Options, out: Finding[>..]&, scanned: i64&, skipped: i64&,
                         q_add(path[..], depth + 1);
                     } else if ends_with(name, ".goose") {
                         var src: u8[>..] = [];
-                        if budget <= 0 || !read_file(path[..], src)
-                            || src.len > o.max_file {
+                        if budget <= 0
+                            || !read_bounded(path[..], o.max_file, src) {
                             skipped = skipped + 1;
                         } else {
                             scanned = scanned + 1;
@@ -404,15 +413,28 @@ fn scan_walk(o: Options, out: Finding[>..]&, scanned: i64&, skipped: i64&,
 // scan_dir scans every .goose file under the directory. It gives the
 // number of files scanned. The skipped count is the second result.
 fn scan_dir(dir: const u8[:], o: Options, out: Finding[>..]&) -> i64, i64 {
+    scan_reset();
     var budget = o.max_files;
-    return scan_dir_budget(dir, o, out, budget);
+    let scanned, skipped = scan_dir_budget(dir, o, out, budget);
+    sort_findings(out);
+    return scanned, skipped;
+}
+
+// scan_reset clears the list of the directories that the walk entered.
+// A run over several trees calls it once, so a directory that two
+// targets name is walked once.
+fn scan_reset() {
+    vis_reset();
+    findings_reset();
+    findings_hit_cap = false;
 }
 
 // scan_dir_budget scans every .goose file under the directory. The
 // budget holds the files that the run may still read. A run over
 // several trees shares one budget, so the file count bound covers the
 // whole run. It gives the number of files scanned. The skipped count
-// is the second result.
+// is the second result. The function does not sort the findings and
+// does not clear the list of the walked directories.
 fn scan_dir_budget(dir: const u8[:], o: Options, out: Finding[>..]&,
                    budget: i64&) -> i64, i64 {
     var scanned: i64 = 0;
@@ -421,9 +443,7 @@ fn scan_dir_budget(dir: const u8[:], o: Options, out: Finding[>..]&,
     q_end.resize(0, 0);
     q_depth.resize(0, 0);
     q_buf.resize(0, 0);
-    vis_reset();
     q_add(dir, 0);
     scan_walk(o, out, scanned, skipped, budget);
-    sort_findings(out);
     return scanned, skipped;
 }
