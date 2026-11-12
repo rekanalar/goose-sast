@@ -57,10 +57,13 @@ jobs:
             tar -xzf "$dest/goose.tar.gz" -C "$dest"
             exe=$(find "$dest" -type f -name goose | head -1)
           fi
-          if [ "$RUNNER_OS" = Windows ]; then
-            got=$(sha256sum "$dest/goose.zip" | cut -d" " -f1)
+          # The hash reads stdin, so the output holds no path. macOS has
+          # shasum and no sha256sum.
+          if [ "$RUNNER_OS" = Windows ]; then file="$dest/goose.zip"; else file="$dest/goose.tar.gz"; fi
+          if [ "$RUNNER_OS" = macOS ]; then
+            got=$(shasum -a 256 < "$file" | cut -d" " -f1)
           else
-            got=$(sha256sum "$dest/goose.tar.gz" | cut -d" " -f1)
+            got=$(sha256sum < "$file" | cut -d" " -f1)
           fi
           test "$got" = "$want"
           chmod +x "$exe"
