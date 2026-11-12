@@ -144,6 +144,21 @@ jobs:
           set -e
           test "$code" = 2
           "$RUNNER_TEMP/sast" -list-rules | grep -q "^G101 "
+          # The explain flag ends the run before any scan.
+          "$RUNNER_TEMP/sast" -explain G304 | grep -q "^Explanation:"
+          "$RUNNER_TEMP/sast" -explain G304 /no/such/path | grep -q "^Fix:"
+          "$RUNNER_TEMP/sast" -explain G304 -rules /no/such/file | grep -q "^Fix:"
+          set +e
+          "$RUNNER_TEMP/sast" -explain g304 2> /dev/null; code=$?
+          test "$code" = 2
+          "$RUNNER_TEMP/sast" -explain 2> /dev/null; code=$?
+          test "$code" = 2
+          "$RUNNER_TEMP/sast" -explain G304 -f sarif 2> /dev/null; code=$?
+          test "$code" = 2
+          "$RUNNER_TEMP/sast" -explain "$(printf 'G\001')" 2> "$RUNNER_TEMP/esc.txt"; code=$?
+          set -e
+          test "$code" = 2
+          if grep -q "$(printf '\001')" "$RUNNER_TEMP/esc.txt"; then echo "raw byte in a fault"; exit 1; fi
           # The block suppression covers the lines between the markers.
           printf '// nosec:start\nlet a = "0.0.0.0";\n// nosec:end\n' > "$RUNNER_TEMP/clean/b.goose"
           "$RUNNER_TEMP/sast" "$RUNNER_TEMP/clean" | grep -q "0 finding"

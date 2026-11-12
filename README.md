@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.10.0";
+import sast from "rekanalar/goose-sast@v0.11.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.10.0";
+import sast from "rekanalar/goose-sast@v0.11.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -78,6 +78,10 @@ fn main() {
 | `format_json(findings, scanned, skipped, out)` | writes one JSON object: the findings, the totals per severity and the file counts |
 | `format_summary(findings, scanned, skipped, out)` | writes the count line |
 | `format_sarif(findings, out)` | writes one SARIF 2.1.0 object with the rule rows and the results |
+| `VERSION` | the version of the package; the SARIF driver reports it |
+| `explain_rule(id, as_json, out) -> bool` | writes the documentation of one built-in rule; false when no built-in rule holds the ID |
+| `explain_known(id) -> i64` | gives the registry index of an exact ID, or -1; an alias and an ID of more than 16 bytes give -1 |
+| `doc_explain(i)`, `doc_flagged(i)`, `doc_clean(i)`, `doc_fix(i)` | give the explanation, the two examples and the fix hint of the rule at the registry index |
 
 ## Command
 
@@ -101,6 +105,7 @@ fn main() {
 | `-quiet` | prints nothing; the exit code stays |
 | `-no-fail` | always exits 0 |
 | `-list-rules` | prints the rule list |
+| `-explain ID` | prints the documentation of one built-in rule and exits; `-f json` prints one JSON object |
 
 The command takes several targets. It scans each target in turn. A directory target runs the walk and a file target runs the text scan. The summary line counts the files of all targets. A directory that two targets name by the same bytes is walked once. The dependency checks read the first target that is a file.
 
@@ -116,6 +121,40 @@ The dependency checks set the exit code to the bitset of cargo-deny.
 | 8 | a denied source |
 
 A run with a banned package and no other finding exits 2, the code of a failed scan. A run with an advisory and no other finding exits 1, the code of a finding.
+
+## Explain a rule
+
+The flag `-explain ID` prints what a rule means. It ends the run before any scan, like `-list-rules`. It reads no path, no config file and no rule file.
+
+```
+sast -explain G304
+```
+
+The text form holds these labels in this order: `ID`, `Severity`, `Confidence`, `CWE`, `Profile`, `Explanation`, `Flagged`, `Clean` and `Fix`. A rule with no CWE prints `none`. The JSON form holds one object with the keys `id`, `severity`, `confidence`, `cwe`, `profile`, `explanation`, `flagged`, `clean` and `fix`. The key `cwe` is 0 for a rule with no CWE. The format `sarif` is a fault.
+
+The ID match is whole and case-exact. An alias such as `B105` is unknown. An unknown ID, a custom rule ID and an ID of more than 16 bytes end with exit code 2. The fault names the first 16 bytes of the ID, and each byte outside printable ASCII appears as `\xNN`.
+
+The text is English and it is constant. Every example is a test. The flagged example reports its rule under `-profile all`. The clean example reports nothing of that rule. The test run prints the precision of the default profile on these examples. This is a number over the example set and not a measure of real code.
+
+The examples of S101 to S104 hold a placeholder. The explanation never prints a secret.
+
+## Output fields
+
+The names below are a contract. A later release may add a field. It never renames or removes a field in a release that keeps the minor number. Before `v1.0.0`, a break raises the minor number. The rule IDs never change and no ID gets a second meaning.
+
+| Output | Fields |
+|---|---|
+| JSON run | `findings`, `totals`, `scanned`, `skipped`, `left_out` |
+| JSON finding | `rule`, `severity`, `confidence`, `cwe`, `file`, `line`, `column`, `message` |
+| JSON totals | `low`, `medium`, `high`, `critical` |
+| JSON explain | `id`, `severity`, `confidence`, `cwe`, `profile`, `explanation`, `flagged`, `clean`, `fix` |
+| SARIF driver | `name`, `version`, `rules` |
+| SARIF rule | `id`, `shortDescription`, `fullDescription`, `help`, `properties` |
+| SARIF result | `ruleId`, `level`, `message`, `locations` |
+
+The SARIF driver version is the version of the package. The `rules` list holds every built-in rule.
+
+Each rule holds the tag `security`. A rule with a CWE holds the tag `external/cwe/cwe-N`, with N as the number. CodeQL uses this tag form. The GitHub code scanning page and the SARIF 2.1.0 text do not name it. A tool that reads another tag form must map it.
 
 ## Profiles
 
@@ -284,6 +323,11 @@ The dependency checks report under their own IDs.
 - The exit code of the dependency checks shares its values with the exit codes of the scan. A caller that needs to tell the two apart reads the output.
 - The command reads the file `.goose-sast.json` of the current directory. A checkout that holds that file sets the settings of the run.
 
+- The explanation is English only. A custom rule has no explanation, and `-explain` gives a fault for its ID.
+- The SARIF driver version was 0.6.0 in earlier releases and now follows the package version. The SARIF rules gain `fullDescription`, `help` and `properties`. A reader that matches the old rule rows must accept these fields.
+- Ten rules have a registry row and no detector in this release: B405 to B409, B412 to B415 and G602. They report nothing. Their explanation says so. B110 reported nothing in earlier releases, because the detector read a qualified name wrongly. It now reports a `try` call with an empty first block.
+- The precision number of the test run is a fixture number. Real code gives other results.
+
 ## Secret shapes
 
 Four rules find a leaked secret by its shape. They run in every profile and need no setup. They search the whole text of the file, so a secret in a comment reports too. The rule G101 reads a name beside a literal and does not do this.
@@ -317,6 +361,8 @@ src/deploy.goose:12:10: critical: S101: an AWS access key ID is in the source
 
 ## Security
 
+- The `-explain` flag prints constants of the package. It reads no file. A fault names at most 16 bytes of the ID, and a byte outside printable ASCII appears as `\xNN`.
+- A newline in an unknown ID stays a newline. The escaper of the faults passes it, so a line of the fault can break. A wrapper that parses the error output line by line must expect this.
 - The default profile leaves out three rules and two directory names. It never hides them in silence. The summary line names the count of left-out directories, and the JSON output holds the same count.
 - The command `-list-rules` marks each rule that the default leaves out. The `-profile strict` flag brings the three rules back. The `-profile all` flag brings the directories back too. The `-include` flag brings one rule back.
 - A directory or a file that the user names as a target is always scanned, whatever its name is. Only a directory that the walk finds below a target can stay out. The match of the name is exact and in lower case, so a name such as `Test` is read.

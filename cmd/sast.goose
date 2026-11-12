@@ -44,6 +44,7 @@ fn usage() {
     write_stderr("  -quiet                               no output but the exit code\n");
     write_stderr("  -no-fail                             always exit 0\n");
     write_stderr("  -list-rules                          print the rule list and exit\n");
+    write_stderr("  -explain ID                          print the explanation of one rule and exit\n");
 }
 
 // esc_control writes the bytes of s to out. A byte outside printable
@@ -138,6 +139,8 @@ fn main() {
     var quiet = false;
     var no_fail = false;
     var list_rules = false;
+    var explain_id: u8[>..] = [];
+    var have_explain = false;
     var json_out = false;
     var sarif_out = false;
     var policy_path: u8[>..] = [];
@@ -272,6 +275,11 @@ fn main() {
             quiet = true;
         } else if a[..] == "-no-fail" {
             no_fail = true;
+        } else if a[..] == "-explain" {
+            i = i + 1;
+            if i >= arg_count() { die("the flag needs a value"); }
+            arg(i, explain_id);
+            have_explain = true;
         } else if a[..] == "-list-rules" {
             list_rules = true;
         } else if a[..] == "-h" || a[..] == "-help" || a[..] == "--help" {
@@ -288,6 +296,22 @@ fn main() {
     }
 
     if bad.len > 0 { die(bad[..]); }
+
+    if have_explain {
+        if sarif_out { die("the format is text or json"); }
+        var out: u8[>..] = [];
+        if !sast::explain_rule(explain_id[..], json_out, out) {
+            let cut = explain_id.len;
+            if cut > 16 { cut = 16; }
+            var msg: u8[>..] = [];
+            format(msg, "no built-in rule has the ID ", explain_id[..cut]);
+            if explain_id.len > 16 { format(msg, "..."); }
+            format(msg, " (only built-in rules have an explanation)");
+            die(msg[..]);
+        }
+        write_stdout(out[..]);
+        exit(0);
+    }
 
     if list_rules {
         var out: u8[>..] = [];

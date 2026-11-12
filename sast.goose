@@ -24,6 +24,11 @@ import config;
 import rules_taint;
 import semver from "rekanalar/goose-semver@v1.0.1";
 import format;
+import rule_docs;
+
+// The version of the package. The SARIF driver reports it, and the README
+// import line names it.
+const VERSION: const u8[:] = "0.11.0";
 
 // The severity order. A finding with a lower severity than the option
 // does not print and does not set the exit code.
@@ -334,6 +339,12 @@ fn rule_count() -> i64 {
     return reg_id_s.len;
 }
 
+// tier_name gives the name of a tier: default or strict.
+fn tier_name(tier: i64) -> const u8[:] {
+    if tier == TIER_STRICT { return "strict"; }
+    return "default";
+}
+
 // list_rules writes one line per rule: the ID, the severity, the
 // confidence, the CWE number, the profile that first holds the rule,
 // the alias and the message.
@@ -343,12 +354,7 @@ fn list_rules(out: u8[>..]&) {
     while i < reg_id_s.len {
         for b in reg_id_s[i] { out.push(b); }
         format(out, " sev=", reg_sev_s[i], " conf=", reg_conf_s[i],
-               " cwe=", reg_cwe_s[i], " profile=");
-        if reg_tier_s[i] == TIER_STRICT {
-            for b in "strict" { out.push(b); }
-        } else {
-            for b in "default" { out.push(b); }
-        }
+               " cwe=", reg_cwe_s[i], " profile=", tier_name(reg_tier_s[i]));
         if reg_alias_s[i].len > 0 {
             format(out, " alias=", reg_alias_s[i]);
         }

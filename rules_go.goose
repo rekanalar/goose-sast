@@ -81,13 +81,15 @@ fn rule_assert(path: const u8[:], src: const u8[:],
 }
 
 // rule_emptycatch runs B110: a try call whose trailing block holds no
-// token. B112 is the alias.
+// token. B112 is the alias. The lexer gives each colon as one token, so
+// the qualified name holds two.
 fn rule_emptycatch(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && tok_of(src, i) == "try"
-            && i > 1 && tk_kind[i - 1] == TK_OTHER && tok_of(src, i - 1) == "::"
-            && tk_kind[i - 2] == TK_IDENT && tok_of(src, i - 2) == "exception" {
+            && i > 2 && tk_kind[i - 1] == TK_OTHER && tok_of(src, i - 1) == ":"
+            && tk_kind[i - 2] == TK_OTHER && tok_of(src, i - 2) == ":"
+            && tk_kind[i - 3] == TK_IDENT && tok_of(src, i - 3) == "exception" {
             // Find the last brace of the line group that follows.
             var k = i + 1;
             var opened = -1;
@@ -103,7 +105,7 @@ fn rule_emptycatch(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                             tok_col_of(src, tk_start[i]),
                             "a catch body holds nothing");
                     }
-                    opened = -1;
+                    break;
                 }
                 k = k + 1;
             }

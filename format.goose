@@ -128,7 +128,9 @@ fn format_json(fs: const Finding[:], scanned: i64, skipped: i64, out: u8[>..]&) 
 // sits in the driver.
 fn format_sarif(fs: const Finding[:], out: u8[>..]&) {
     reg_ensure();
-    out.append("{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"goose-sast\",\"version\":\"0.6.0\",\"rules\":[");
+    out.append("{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"goose-sast\",\"version\":\"");
+    out.append(VERSION);
+    out.append("\",\"rules\":[");
     var i: i64 = 0;
     while i < reg_id_s.len {
         if i > 0 { out.push(44); }
@@ -136,7 +138,17 @@ fn format_sarif(fs: const Finding[:], out: u8[>..]&) {
         json_text(out, reg_id_s[i]);
         out.append(",\"shortDescription\":{\"text\":");
         json_text(out, reg_msg_s[i]);
-        out.append("}}");
+        out.append("},\"fullDescription\":{\"text\":");
+        json::format_string(out, doc_explain(i));
+        out.append("},\"help\":{\"text\":");
+        json::format_string(out, doc_fix(i));
+        out.append("},\"properties\":{\"tags\":[\"security\"");
+        if reg_cwe_s[i] > 0 {
+            out.append(",\"external/cwe/cwe-");
+            json::format_int(out, reg_cwe_s[i]);
+            out.push(34);
+        }
+        out.append("]}}");
         i = i + 1;
     }
     out.append("]}},\"results\":[");
