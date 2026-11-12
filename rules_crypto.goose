@@ -239,14 +239,14 @@ fn import_bandit_target(target: const u8[:]) -> i64 {
     if has_word(low[..], "ftp") { return 29; }
     if has_word(low[..], "pickle") { return 30; }
     if has_word(low[..], "process") { return 31; }
-    if has_word(low[..], "xmlrpc") { return 38; }
-    if has_word(low[..], "lxml") { return 37; }
+    if has_word(low[..], "xmlrpc") { return reg_find("B411"); }
+    if has_word(low[..], "lxml") { return reg_find("B410"); }
     return -1;
 }
 
-// rule_blocklist runs G501 to G507 and B401 to B415: the import lines
-// of the blocklist. Each import line reports at most one row; the gosec
-// rows win over the bandit rows.
+// rule_blocklist runs G501 to G507 and B401 to B404, B410 and B411:
+// the import lines of the blocklist. Each import line reports at most
+// one row; the gosec rows win over the bandit rows.
 fn rule_blocklist(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {

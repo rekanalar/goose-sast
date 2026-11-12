@@ -11,7 +11,7 @@ The package is a library and a command. The library scans a text or a tree and g
 A release holds one binary for each of Linux x64, macOS arm64 and Windows x64. The binary needs no Goose install and no C compiler.
 
 ```sh
-v=v0.14.0
+v=v0.15.0
 base=https://github.com/rekanalar/goose-sast/releases/download/$v
 curl -fsSLO $base/sast-linux-x64 -O $base/checksums.txt -O $base/checksums.txt.bundle
 sha256sum -c checksums.txt --ignore-missing
@@ -27,7 +27,7 @@ Upload the findings to code scanning with a step of six lines:
 
 ```yaml
 - run: |
-    curl -fsSLO https://github.com/rekanalar/goose-sast/releases/download/v0.14.0/sast-linux-x64
+    curl -fsSLO https://github.com/rekanalar/goose-sast/releases/download/v0.15.0/sast-linux-x64
     chmod +x sast-linux-x64 && ./sast-linux-x64 -f sarif -no-fail . > sast.sarif
 - uses: github/codeql-action/upload-sarif@v3
   with: { sarif_file: sast.sarif }
@@ -38,7 +38,7 @@ Run the tool before each commit with a `pre-commit` entry. The hook runs the `sa
 ```yaml
 repos:
   - repo: https://github.com/rekanalar/goose-sast
-    rev: v0.14.0
+    rev: v0.15.0
     hooks:
       - id: goose-sast
 ```
@@ -46,7 +46,7 @@ repos:
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.14.0";
+import sast from "rekanalar/goose-sast@v0.15.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -65,7 +65,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.14.0";
+import sast from "rekanalar/goose-sast@v0.15.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -335,7 +335,8 @@ The rule IDs follow the IDs of `gosec` and `bandit`, with the aliases below. Run
 | G401 (B324) | a weak hash |
 | G702, G703 | a value from the command line, the environment or a file reaches a process call or a file path |
 | G404 (B311) | a weak random source |
-| G501 to G507, B401 to B415 | blocklisted imports |
+| G501 to G507, B401 to B404, B410, B411 | blocklisted imports |
+| G602 | a constant index that lies outside a fixed array |
 | B101 | an `assert` outside a test file (strict) |
 | G104 | the result of a call is dropped (strict) |
 | B110 (B112) | an empty catch body |
@@ -376,7 +377,7 @@ An import with no `@` is a local path, and the checks skip it.
 - The C part check cannot see a package that the cache lacks, or a layout that a newer compiler writes. It reports that case as a finding and never as silence. It reads the entry of each listed package only. The root file lists every package, so no package stays hidden.
 - A tag name that holds a slash cannot make a cache path. The check reports such a package as unreadable.
 - The rules read the source as text. A name that a program builds at run time stays invisible.
-- The tokenizer holds strings, comments, identifiers and numbers. It does not parse the language, so a rule that needs types does not exist.
+- The tokenizer holds strings, comments, identifiers and numbers. It does not parse the language. The only rule that reads a type reads the length of an array from its declaration.
 - G401 and G404 report a bare call and a qualified call, such as `md5::sum(x)` and `rand::int(n)`. The language stores no function value, so no name can hold the weak function. gosec and bandit resolve the import alias in the same way. Only semgrep follows a function value, and Goose has none to follow.
 - The taint rules read the braces of the file, not a parser. Each open brace makes a scope. A name is visible in its scope and in the scopes inside it. A name of a sibling scope stays out, like the scope model of ESLint. A brace in a string or a comment does not count. A rebinding of a name does not clear an earlier taint of the same scope.
 - The credential rule G101 reads one line. A name and its literal sit on the same line. A secret name of one function misses a literal of another.
@@ -403,7 +404,25 @@ An import with no `@` is a local path, and the checks skip it.
 
 - The explanation is English only. A custom rule has no explanation, and `-explain` gives a fault for its ID.
 - The SARIF driver version was 0.6.0 in earlier releases and now follows the package version. The SARIF rules gain `fullDescription`, `help` and `properties`. A reader that matches the old rule rows must accept these fields.
-- Ten rules have a registry row and no detector in this release: B405 to B409, B412 to B415 and G602. They report nothing. Their explanation says so. B110 reported nothing in earlier releases, because the detector read a qualified name wrongly. It now reports a `try` call with an empty first block.
+- Nine rules left the registry in this release. The table below names each one. No Goose package has any of these forms. The one xml package of the index expands no entity. The release removes the rows instead of keeping a rule that can never fire.
+
+| Removed ID | Reference rule | Reason it leaves |
+|---|---|---|
+| B405 | bandit B405 | an xml reader that loads external entities |
+| B406 | bandit B406 | a sax reader that loads external entities |
+| B407 | bandit B407 | a dom builder that loads external entities |
+| B408 | bandit B408 | a minidom reader that loads external entities |
+| B409 | bandit B409 | a pulldom reader that loads external entities |
+| B412 | bandit B412 | a cgi handler that passes request values through the environment |
+| B413 | bandit B413 | the old crypto cipher library |
+| B414 | bandit B414 | the cryptography module |
+| B415 | bandit B415 | the pyghmi library for ipmi |
+- A removed ID in an `-include` or `-exclude` flag or in a config file is an unknown ID. The run faults with `no rule carries the ID X` and exits 2. This is a break from the earlier release, where the ID existed. A removed ID in a suppression comment stays plain text and silences nothing.
+- The `-explain` of a removed ID exits 2 with the fault `no built-in rule has the ID X`.
+- G602 reads a constant index only. It reports a literal index that is negative or at least the length of the array. It reports nothing for an index that comes from a variable. A length that is not a plain decimal literal, such as `i64[2+2]`, gives no length, so the rule reports nothing. A name that an inner scope rebinds with another type reports nothing. A parameter or a field holds no length, so the rule reports nothing for it.
+- The binding table of G602 holds at most 4096 entries per file. A use of an array that did not fit reports nothing. The rule reads no file and no path other than the file it scans.
+- A custom rule file may now use one of the nine removed IDs. The registry holds no such ID, so the file loads it as a new rule. Earlier releases rejected such a file.
+- B110 reported nothing in earlier releases, because the detector read a qualified name wrongly. It now reports a `try` call with an empty first block.
 - The precision number of the test run is a fixture number. Real code gives other results.
 - The fingerprint of a finding is per tree layout. A project that moves its files writes a new baseline.
 - The hash of the fingerprint is FNV-1a 64 and it has no key. A line with a secret gives a hash that a reader can test guesses against. The baseline file of such a line holds a verifier for that secret.

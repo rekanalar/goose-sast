@@ -3,8 +3,7 @@
 // is constant. The program reads no part of it from a file.
 //
 // A rule that reads a policy or an advisory file shows the text of that
-// file as its example. A rule with no detector in this release says so
-// in its explanation. The examples of S101 to S104 hold placeholders,
+// file as its example. The examples of S101 to S104 hold placeholders,
 // and doc_fixture builds the scanned text from pieces at run time.
 namespace sast;
 
@@ -197,42 +196,6 @@ fn docs_ensure() {
             "import m from \"a/goose-xmlrpc@v1.0.0\";",
             "import m from \"a/goose-sha256@v1.0.0\";",
             "Use a protocol with a typed, bounded decoder.");
-    doc_put("B405", "An xml reader may load external entities and expand entities without a limit. A document from an attacker then reads files or exhausts memory. This release has no detector for this rule, so it reports nothing.",
-            "import m from \"a/goose-xml@v1.0.0\";",
-            "import m from \"a/goose-sha256@v1.0.0\";",
-            "Turn off external entities and limit the expansion of entities.");
-    doc_put("B406", "A sax reader may load external entities and expand entities without a limit. A document from an attacker then reads files or exhausts memory. This release has no detector for this rule, so it reports nothing.",
-            "import m from \"a/goose-xmlsax@v1.0.0\";",
-            "import m from \"a/goose-sha256@v1.0.0\";",
-            "Turn off external entities and limit the expansion of entities.");
-    doc_put("B407", "A dom builder may load external entities and expand entities without a limit. A document from an attacker then reads files or exhausts memory. This release has no detector for this rule, so it reports nothing.",
-            "import m from \"a/goose-xmldom@v1.0.0\";",
-            "import m from \"a/goose-sha256@v1.0.0\";",
-            "Turn off external entities and limit the expansion of entities.");
-    doc_put("B408", "A minidom reader may load external entities and expand entities without a limit. A document from an attacker then reads files or exhausts memory. This release has no detector for this rule, so it reports nothing.",
-            "import m from \"a/goose-minidom@v1.0.0\";",
-            "import m from \"a/goose-sha256@v1.0.0\";",
-            "Turn off external entities and limit the expansion of entities.");
-    doc_put("B409", "A pulldom reader may load external entities and expand entities without a limit. A document from an attacker then reads files or exhausts memory. This release has no detector for this rule, so it reports nothing.",
-            "import m from \"a/goose-pulldom@v1.0.0\";",
-            "import m from \"a/goose-sha256@v1.0.0\";",
-            "Turn off external entities and limit the expansion of entities.");
-    doc_put("B412", "A cgi handler passes request values through the environment. Handlers often trust these values, and an attacker sets them. This release has no detector for this rule, so it reports nothing.",
-            "import m from \"a/goose-httpcgi@v1.0.0\";",
-            "import m from \"a/goose-sha256@v1.0.0\";",
-            "Use a handler that reads the request through a safe interface.");
-    doc_put("B413", "An old crypto cipher library holds weak ciphers and has had no security fixes for years. This release has no detector for this rule, so it reports nothing.",
-            "import m from \"a/goose-crypto@v1.0.0\";",
-            "import m from \"a/goose-sha256@v1.0.0\";",
-            "Use a maintained library with authenticated encryption.");
-    doc_put("B414", "A cryptography module is a risk when a program uses it with weak choices. This import marks the file for review. This release has no detector for this rule, so it reports nothing.",
-            "import m from \"a/goose-cryptography@v1.0.0\";",
-            "import m from \"a/goose-sha256@v1.0.0\";",
-            "Check the algorithms, the modes and the key sizes in the file.");
-    doc_put("B415", "A bridge to a web application server often runs with the proxy variables of the request. An attacker sets these variables and changes the program. This release has no detector for this rule, so it reports nothing.",
-            "import m from \"a/goose-wsgiref@v1.0.0\";",
-            "import m from \"a/goose-sha256@v1.0.0\";",
-            "Do not trust the proxy variables of a request.");
     doc_put("G103", "An extern function calls code outside the type checker. The compiler cannot check the types or the bounds of the call. A wrong signature or a bad buffer size corrupts memory.",
             "extern \"c_fn\" fn f(x: i64);",
             "fn f(x: i64) -> i64 { return x; }",
@@ -241,10 +204,10 @@ fn docs_ensure() {
             "write_file(\"a\", d);",
             "let r = write_file(\"a\", d);",
             "Read the result and handle a failure. Name an unused result with an underscore, so the intent shows.");
-    doc_put("G602", "An index into a fixed array that comes from a variable may lie outside the array. A read or a write beyond the end corrupts memory or leaks data. This release has no detector for this rule, so it reports nothing.",
-            "let a: i64[4] = [0, 0, 0, 0];\nlet v = a[i];",
-            "let a: i64[4] = [0, 0, 0, 0];\nlet v = a[i & 3];",
-            "Check the index against the length before the access. Use a bounded loop.");
+    doc_put("G602", "A fixed array has a length that the compiler knows. An index that lies outside that length aborts the run with an out of bounds error. The program stops before the wrong value is used. The rule reports a literal index that is negative or at least the length.",
+            "let a: i64[4] = [1, 2, 3, 4];\nlet v = a[4];",
+            "let a: i64[4] = [1, 2, 3, 4];\nlet v = a[3];",
+            "Keep the index inside the length. Use a loop with a bound, or a growable array.");
     doc_put("G702", "A value from an outside source, such as the arguments or the network, reaches a process call. An attacker then chooses the command or its arguments. This is command injection.",
             "let x = args();\nrun(\"/bin/ls\", x);",
             "let x = args();\nrun(\"/bin/ls\", \"-l\");",
@@ -303,16 +266,6 @@ fn docs_ensure() {
     doc_exempt("ADVISORY", "the rule reads a policy or an advisory file");
     doc_exempt("PIN", "the rule reads a policy or an advisory file");
     doc_exempt("CPART", "the rule reads a policy or an advisory file");
-    doc_exempt("B405", "the release has no detector for the rule");
-    doc_exempt("B406", "the release has no detector for the rule");
-    doc_exempt("B407", "the release has no detector for the rule");
-    doc_exempt("B408", "the release has no detector for the rule");
-    doc_exempt("B409", "the release has no detector for the rule");
-    doc_exempt("B412", "the release has no detector for the rule");
-    doc_exempt("B413", "the release has no detector for the rule");
-    doc_exempt("B414", "the release has no detector for the rule");
-    doc_exempt("B415", "the release has no detector for the rule");
-    doc_exempt("G602", "the release has no detector for the rule");
     doc_loaded = true;
 }
 

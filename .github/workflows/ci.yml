@@ -144,6 +144,28 @@ jobs:
           set -e
           test "$code" = 2
           "$RUNNER_TEMP/sast" -list-rules | grep -q "^G101 "
+          # The rules that left the registry are no longer known. The
+          # rule list names none of them, and a flag or an explain of
+          # one is a fault.
+          for id in B405 B406 B407 B408 B409 B412 B413 B414 B415; do
+            if "$RUNNER_TEMP/sast" -list-rules | grep -q "^$id "; then
+              echo "the rule list holds $id"; exit 1
+            fi
+          done
+          set +e
+          "$RUNNER_TEMP/sast" -exclude B405 test/rules 2> /dev/null; code=$?
+          set -e
+          test "$code" = 2
+          set +e
+          "$RUNNER_TEMP/sast" -explain B405 2> /dev/null; code=$?
+          set -e
+          test "$code" = 2
+          # The constant index outside a fixed array reports, and an
+          # index inside the array stays silent.
+          printf 'let a: i64[4] = [1, 2, 3, 4];\nlet v = a[4];\n' > "$RUNNER_TEMP/bounds.goose"
+          "$RUNNER_TEMP/sast" -no-fail "$RUNNER_TEMP/bounds.goose" | grep -q "G602"
+          printf 'let a: i64[4] = [1, 2, 3, 4];\nlet v = a[3];\n' > "$RUNNER_TEMP/ok.goose"
+          "$RUNNER_TEMP/sast" -no-fail "$RUNNER_TEMP/ok.goose" | grep -q "0 finding"
           # The explain flag ends the run before any scan.
           "$RUNNER_TEMP/sast" -explain G304 | grep -q "^Explanation:"
           "$RUNNER_TEMP/sast" -explain G304 /no/such/path | grep -q "^Fix:"

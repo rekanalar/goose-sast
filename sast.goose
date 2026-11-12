@@ -30,7 +30,7 @@ import rule_docs;
 
 // The version of the package. The SARIF driver reports it, and the README
 // import line names it.
-const VERSION: const u8[:] = "0.14.0";
+const VERSION: const u8[:] = "0.15.0";
 
 // The severity order. A finding with a lower severity than the option
 // does not print and does not set the exit code.
@@ -245,19 +245,11 @@ fn reg_ensure() {
     reg_put("B402", SEV_HIGH, CONF_HIGH, 319, "", "an import of ftp is in use");
     reg_put("B403", SEV_LOW, CONF_HIGH, 502, "", "an import of pickle is in use");
     reg_put("B404", SEV_LOW, CONF_HIGH, 78, "", "an import of a process package is in use");
-    reg_put("B405", SEV_LOW, CONF_HIGH, 20, "", "an import of xml is in use");
-    reg_put("B406", SEV_LOW, CONF_HIGH, 20, "", "an import of a sax xml reader is in use");
-    reg_put("B407", SEV_LOW, CONF_HIGH, 20, "", "an import of a dom xml builder is in use");
-    reg_put("B408", SEV_LOW, CONF_HIGH, 20, "", "an import of a minidom reader is in use");
-    reg_put("B409", SEV_LOW, CONF_HIGH, 20, "", "an import of a pulldom reader is in use");
     reg_put("B410", SEV_LOW, CONF_HIGH, 382, "", "an import of lxml is in use");
     reg_put("B411", SEV_HIGH, CONF_HIGH, 20, "", "an import of xmlrpc is in use");
-    reg_put("B412", SEV_HIGH, CONF_HIGH, 386, "", "an import of a cgi handler is in use");
-    reg_put("B413", SEV_HIGH, CONF_HIGH, 327, "", "an import of a crypto cipher library is in use");
-    reg_put("B414", SEV_LOW, CONF_HIGH, 327, "", "an import of a cryptography module is in use");
     reg_put("G103", SEV_LOW, CONF_HIGH, 242, "", "an extern function calls code outside the type checker");
     reg_put("G104", SEV_LOW, CONF_MEDIUM, 703, "", "the result of the call is dropped");
-    reg_put("G602", SEV_MEDIUM, CONF_MEDIUM, 118, "", "a fixed array is indexed with a variable");
+    reg_put("G602", SEV_MEDIUM, CONF_MEDIUM, 118, "", "a constant index lies outside a fixed array");
     reg_put("G702", SEV_HIGH, CONF_MEDIUM, 78, "", "a value from an outside source reaches a process call");
     reg_put("G703", SEV_HIGH, CONF_MEDIUM, 22, "", "a value from an outside source reaches a file path");
     reg_put("BAN", SEV_HIGH, CONF_HIGH, 0, "", "a dependency is banned");
@@ -265,7 +257,6 @@ fn reg_ensure() {
     reg_put("SOURCE", SEV_MEDIUM, CONF_HIGH, 0, "", "a dependency source is not allowed");
     reg_put("ADVISORY", SEV_CRITICAL, CONF_HIGH, 0, "", "a dependency has a known advisory");
     reg_put("G117", SEV_MEDIUM, CONF_MEDIUM, 499, "", "a secret-named value goes into a JSON writer");
-    reg_put("B415", SEV_HIGH, CONF_HIGH, 502, "", "an import of a web application bridge is in use");
     reg_put("S101", SEV_CRITICAL, CONF_HIGH, 798, "", "an AWS access key ID is in the source");
     reg_put("S102", SEV_CRITICAL, CONF_HIGH, 798, "", "a GitHub token is in the source");
     reg_put("S103", SEV_HIGH, CONF_HIGH, 798, "", "a Slack token is in the source");

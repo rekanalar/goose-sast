@@ -376,6 +376,7 @@ fn scan_text(path: const u8[:], src: const u8[:], o: Options, out: Finding[>..]&
     rule_taint(src, file_idx, raw);
     rule_dropped(src, file_idx, raw);
     rule_shapes(src, file_idx, raw);
+    rule_bounds(src, file_idx, raw);
     run_custom(src, file_idx, raw);
     var kept: i64 = 0;
     for f in raw {

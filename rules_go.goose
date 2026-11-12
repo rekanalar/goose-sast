@@ -269,3 +269,187 @@ fn is_number_word(text: const u8[:]) -> bool {
     }
     return true;
 }
+
+// number_value gives the value of a decimal number.
+fn number_value(text: const u8[:]) -> i64 {
+    var v: i64 = 0;
+    var i: i64 = 0;
+    while i < text.len {
+        v = v * 10 + (text[i] - 48);
+        i = i + 1;
+    }
+    return v;
+}
+
+// The bindings of the names of the file that the scanner holds now.
+// Each entry holds the token of the name, the scope that binds it and
+// the length of the array. A length of -1 means that the name holds no
+// fixed array of a known length.
+var bound_tok: i64[>..] = [];
+var bound_scope: i64[>..] = [];
+var bound_len: i64[>..] = [];
+
+// BOUND_MAX is the most bindings that one file may hold.
+const BOUND_MAX: i64 = 4096;
+
+// bound_reset empties the binding table.
+fn bound_reset() {
+    bound_tok.resize(0, 0);
+    bound_scope.resize(0, 0);
+    bound_len.resize(0, 0);
+}
+
+// bound_add records one binding of a name.
+fn bound_add(name_tok: i64, scope: i64, length: i64) {
+    if bound_tok.len >= BOUND_MAX { return; }
+    bound_tok.push(name_tok);
+    bound_scope.push(scope);
+    bound_len.push(length);
+}
+
+// bound_type gives the length of the fixed array that the type at the
+// token i names, and the token after the type. A length of -1 means
+// that the type names no fixed array of a known length. The length is
+// the number in the last bracket pair of the type.
+fn bound_type(src: const u8[:], i: i64) -> i64, i64 {
+    var depth: i64 = 0;
+    var open: i64 = -1;
+    var length: i64 = -1;
+    var end = tk_count;
+    var k = i;
+    while k < tk_count {
+        if tk_kind[k] == TK_OTHER {
+            let t = tok_of(src, k);
+            if t == "[" {
+                if depth == 0 { open = k; }
+                depth = depth + 1;
+            } else if t == "]" {
+                if depth > 0 {
+                    depth = depth - 1;
+                    if depth == 0 {
+                        // The last closed pair decides the length.
+                        length = -1;
+                        if k == open + 2 && tk_kind[open + 1] == TK_NUMBER {
+                            let text = tok_of(src, open + 1);
+                            if is_number_word(text) && text.len <= 18 {
+                                length = number_value(text);
+                            }
+                        }
+                    }
+                }
+            } else if depth == 0 && (t == "=" || t == ";" || t == "," || t == ")") {
+                end = k;
+                break;
+            }
+        }
+        k = k + 1;
+    }
+    return length, end;
+}
+
+// bound_decl records the bindings of a declaration. The names sit
+// after the let or the var. A name with a type takes the length of
+// the fixed array that the type names. A name without a type holds
+// no length, and it hides an older array of the same name.
+fn bound_decl(src: const u8[:], i: i64) -> i64 {
+    var j = i;
+    var length: i64 = -1;
+    var end: i64 = 0;
+    while j < tk_count && tk_kind[j] == TK_IDENT {
+        let name = j;
+        length = -1;
+        end = j + 1;
+        if j + 1 < tk_count && tk_kind[j + 1] == TK_OTHER
+           && tok_of(src, j + 1) == ":" {
+            length, end = bound_type(src, j + 2);
+        }
+        bound_add(name, tk_scope[name], length);
+        j = end;
+        if j < tk_count && tk_kind[j] == TK_OTHER && tok_of(src, j) == "," {
+            j = j + 1;
+        } else {
+            break;
+        }
+    }
+    return j;
+}
+
+// bound_check reports an index use that lies outside the array that
+// the name holds. The binding of the name is the last one before the
+// use, in token order, that the scope of the use can see.
+fn bound_check(src: const u8[:], name_tok: i64, num_tok: i64, neg: bool,
+               idx: i64, file_idx: i64, out: Finding[>..]&) {
+    // The name is the cheap test, so it comes before the scope walk.
+    let name = tok_of(src, name_tok);
+    let scope = tk_scope[name_tok];
+    var length: i64 = -1;
+    var k = bound_tok.len - 1;
+    while k >= 0 {
+        if tok_of(src, bound_tok[k]) == name && bound_tok[k] < name_tok
+           && scope_sees(bound_scope[k], scope) {
+            length = bound_len[k];
+            break;
+        }
+        k = k - 1;
+    }
+    if length < 0 { return; }
+    let text = tok_of(src, num_tok);
+    if !is_number_word(text) { return; }
+    // A literal of more than 18 digits lies outside; it is never parsed.
+    var outside = text.len > 18;
+    if !outside {
+        let n = number_value(text);
+        // A minus sign before zero is zero, so it stays inside.
+        outside = n >= length;
+        if neg { outside = n != 0; }
+    }
+    if !outside { return; }
+    rep(out, idx, file_idx, tk_line[num_tok], tok_col_of(src, tk_start[num_tok]),
+        reg_msg_s[idx]);
+}
+
+// rule_bounds runs G602: a constant index that lies outside a fixed
+// array. The rule reads the length of the array from its declaration
+// and the index from the use.
+fn rule_bounds(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
+    let idx = reg_find("G602");
+    bound_reset();
+    var i: i64 = 0;
+    while i < tk_count {
+        if tk_kind[i] == TK_IDENT {
+            let w = tok_of(src, i);
+            if (w == "let" || w == "var") && i + 1 < tk_count
+               && tk_kind[i + 1] == TK_IDENT {
+                // A declaration binds its names.
+                let end = bound_decl(src, i + 1);
+                i = end - 1;
+            } else if i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER
+                      && tok_of(src, i + 1) == ":"
+                      && !(i + 2 < tk_count && tk_kind[i + 2] == TK_OTHER
+                           && tok_of(src, i + 2) == ":") {
+                // A parameter or a field binds the name too. It holds
+                // no length, so it hides an older array.
+                bound_add(i, tk_scope[i], -1);
+            } else if i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER
+                      && tok_of(src, i + 1) == "["
+                      && !(i > 0 && tk_kind[i - 1] == TK_OTHER
+                           && tok_of(src, i - 1) == ".") {
+                // An index use. A name after a dot is a field of
+                // another value, so it is no use of a name.
+                var k = i + 2;
+                var neg = false;
+                if k < tk_count && tk_kind[k] == TK_OTHER
+                   && tok_of(src, k) == "-" {
+                    neg = true;
+                    k = k + 1;
+                }
+                if k < tk_count && tk_kind[k] == TK_NUMBER
+                   && k + 1 < tk_count && tk_kind[k + 1] == TK_OTHER
+                   && tok_of(src, k + 1) == "]" {
+                    bound_check(src, i, k, neg, idx, file_idx, out);
+                }
+            }
+        }
+        i = i + 1;
+    }
+}
