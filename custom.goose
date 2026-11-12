@@ -6,11 +6,23 @@
 namespace sast;
 
 import json;
+import regex;
 
 // The kinds of a custom rule.
 const CR_IDENT: i64 = 1;
 const CR_STRING: i64 = 2;
 const CR_COMMENT: i64 = 3;
+const CR_REGEX: i64 = 4;
+
+// The most custom rules that one run may hold.
+const MAX_CUSTOM: i64 = 1024;
+
+// The compiled expressions of the regex rules, in the order of the
+// rules. An array of compiled expressions takes appends and a walk, no
+// index. An array of expressions holds no resize call, so the rules of a
+// file that faults stay out of the run. The slot of an expression is
+// the place of its rule in cr_kind.
+var cr_regex: regex::Regex[>..] = [];
 
 // The custom rules of the run. The bytes of the match text live in one
 // buffer; the offset lists hold the range of each rule.
@@ -44,6 +56,7 @@ fn custom_reset() {
     if cr_base < 0 { cr_base = reg_id_s.len; }
     custom_cut(cr_base, 0);
     cr_buf.resize(0, 0);
+    cr_regex = [];
 }
 
 // custom_cut cuts the registry to reg_len rows and the custom rule
@@ -104,12 +117,15 @@ fn read_custom_more(text: const u8[:], err: u8[>..]&) -> bool {
     var scratch: u8[>..] = [];
     var r = json::reader(text);
     var bad: u8[>..] = [];
+    // The expressions of this file. They join the run only when the
+    // whole file reads, so a fault leaves no expression behind.
+    var pending: regex::Regex[>..] = [];
     if json::peek(r) == 91 {
-        read_custom_list(r, scratch, bad);
+        read_custom_list(r, scratch, bad, pending);
     } else {
         json::each_member(r) { key =>
             if key == "rules" {
-                read_custom_list(r, scratch, bad);
+                read_custom_list(r, scratch, bad, pending);
             } else {
                 json::skip(r);
             }
@@ -125,13 +141,15 @@ fn read_custom_more(text: const u8[:], err: u8[>..]&) -> bool {
         for b in json::message(r) { err.push(b); }
         return false;
     }
+    for re in pending { cr_regex.push(copy(re)); }
     return true;
 }
 
 // read_custom_list reads the rules of a list.
-fn read_custom_list(r: json::Reader&, scratch: u8[>..]&, bad: u8[>..]&) {
+fn read_custom_list(r: json::Reader&, scratch: u8[>..]&, bad: u8[>..]&,
+                    pending: regex::Regex[>..]&) {
     json::each_element(r) {
-        read_one_custom(r, scratch, bad);
+        read_one_custom(r, scratch, bad, pending);
     };
 }
 
@@ -149,13 +167,15 @@ fn kind_of_name(name: const u8[:]) -> i64 {
     if name == "ident" { return CR_IDENT; }
     if name == "string" { return CR_STRING; }
     if name == "comment" { return CR_COMMENT; }
+    if name == "regex" { return CR_REGEX; }
     return -1;
 }
 
 // read_one_custom reads one rule of the list and appends it to the
 // registry. Every string is copied at once, because a read string
 // points into the text of the reader.
-fn read_one_custom(r: json::Reader&, scratch: u8[>..]&, bad: u8[>..]&) {
+fn read_one_custom(r: json::Reader&, scratch: u8[>..]&, bad: u8[>..]&,
+                   pending: regex::Regex[>..]&) {
     var id: u8[>..] = [];
     var sev_name: u8[>..] = [];
     var kind_name: u8[>..] = [];
@@ -190,7 +210,22 @@ fn read_one_custom(r: json::Reader&, scratch: u8[>..]&, bad: u8[>..]&) {
     if sev < 0 { format(bad, "the severity of ", id[..], " is not a name\n"); return; }
     if kind < 0 { format(bad, "the kind of ", id[..], " is not a name\n"); return; }
     if match_text.len == 0 { format(bad, "the rule ", id[..], " holds no text\n"); return; }
+    if cr_kind.len >= MAX_CUSTOM {
+        format(bad, "a run holds at most 1024 custom rules\n");
+        return;
+    }
     if reg_find(id[..]) >= 0 { format(bad, "the id ", id[..], " is already in the registry\n"); return; }
+    // A regex rule compiles at load. An expression that does not parse,
+    // or that holds an anchor, is a fault that names the rule.
+    if kind == CR_REGEX {
+        var rx_err: u8[>..] = [];
+        let re = regex::compile(match_text[..], rx_err);
+        if rx_err.len > 0 {
+            format(bad, "the expression of ", id[..], " does not compile: ", rx_err[..], "\n");
+            return;
+        }
+        pending.push(copy(re));
+    }
     var message: u8[>..] = [];
     if msg.len > 0 { for c in msg { message.push(c); } }
     else { for c in "a custom rule matched" { message.push(c); } }
@@ -203,6 +238,35 @@ fn read_one_custom(r: json::Reader&, scratch: u8[>..]&, bad: u8[>..]&) {
     cr_kind.push(kind);
     cr_exact.push(exact);
     cr_rule.push(reg_id_s.len - 1);
+}
+
+// The offsets of the newlines of the last file. The list gives the
+// line of a byte offset without a walk over the bytes.
+var nl_at: i64[>..] = [];
+
+// nl_build fills the list of the newline offsets of the text.
+fn nl_build(src: const u8[:]) {
+    nl_at.resize(0, 0);
+    var i: i64 = 0;
+    while i < src.len {
+        if src[i] == 10 { nl_at.push(i); }
+        i = i + 1;
+    }
+}
+
+// nl_pos gives the line and the column of the byte at. The line counts
+// from 1 and the column counts from 1.
+fn nl_pos(at: i64) -> i64, i64 {
+    var lo: i64 = 0;
+    var hi: i64 = nl_at.len;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if nl_at[mid] < at { lo = mid + 1; } else { hi = mid; }
+    }
+    let line = lo + 1;
+    var last: i64 = -1;
+    if lo > 0 { last = nl_at[lo - 1]; }
+    return line, at - last;
 }
 
 // run_custom applies every custom rule over the tokens of the file.
@@ -259,6 +323,41 @@ fn run_custom(src: const u8[:], file_idx: i64, out: Finding[>..]&) -> i64 {
             }
         }
         i = i + 1;
+    }
+    // The regex rules search the whole text of the file. The list of
+    // the newline offsets gives the line of every match, so the bytes
+    // of the file are walked once and not once per rule.
+    nl_build(src);
+    // The expressions come in the order of the regex rules. The ordinal
+    // of an expression is its place among the regex rules.
+    var ord: i64 = 0;
+    for re in cr_regex {
+        // The slot of the expression is the place of its rule in
+        // cr_kind. The expressions come in the order of the rules.
+        var slot: i64 = -1;
+        var seen: i64 = 0;
+        var k: i64 = 0;
+        while k < cr_kind.len {
+            if cr_kind[k] == CR_REGEX {
+                if seen == ord { slot = k; break; }
+                seen = seen + 1;
+            }
+            k = k + 1;
+        }
+        if slot < 0 { break; }
+        var rx = re;
+        regex::each_match(rx, src) { s, e =>
+            // An empty match reports once, at the start of the file. Later
+            // empty matches stay out, so a rule such as z* cannot flood.
+            let later_empty = e == s && s > 0;
+            if !later_empty && found < MAX_FILE_MATCHES {
+                let line, col = nl_pos(s);
+                rep(out, cr_rule[slot], file_idx, line, col,
+                    reg_msg_s[cr_rule[slot]]);
+                found = found + 1;
+            }
+        };
+        ord = ord + 1;
     }
     return found;
 }

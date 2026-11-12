@@ -293,6 +293,51 @@ jobs:
             -rules "$RUNNER_TEMP/r1.json" "$RUNNER_TEMP/t1" > out.txt
           grep -q "HA01" out.txt
           grep -q "HA02" out.txt
+          # A next-line directive silences the line below it. The unused
+          # report names a suppression that silenced nothing, and only
+          # when the flag is on.
+          printf '// nosec:next\nlisten("0.0.0.0", p);\n// nosec G204\nlet a = 1;\n' > nl.goose
+          "$RUNNER_TEMP/sast" -no-fail nl.goose > out.txt
+          if grep -q "G102" out.txt; then echo "the next-line directive did not hold"; exit 1; fi
+          "$RUNNER_TEMP/sast" -no-fail -report-unused nl.goose 2> err.txt
+          grep -q "nl.goose:3: unused suppression \[G204\]" err.txt
+          "$RUNNER_TEMP/sast" -no-fail nl.goose 2> err.txt
+          if grep -q "unused suppression" err.txt; then echo "the report was on without the flag"; exit 1; fi
+          # The exit codes stay as they are with the flag: 1 for a
+          # finding, 0 for a clean file, 2 for a fault.
+          printf 'listen("0.0.0.0", p);\n' > f.goose
+          code=0; "$RUNNER_TEMP/sast" -report-unused f.goose 2> /dev/null > /dev/null || code=$?
+          test "$code" = 1
+          printf 'let a = 1;\n' > c.goose
+          "$RUNNER_TEMP/sast" -report-unused c.goose > /dev/null 2> /dev/null
+          code=0; "$RUNNER_TEMP/sast" -report-unused nosuch.goose 2> /dev/null > /dev/null || code=$?
+          test "$code" = 2
+          # A call through the module name reports.
+          printf 'let a = md5::sum(x);\n' > q.goose
+          "$RUNNER_TEMP/sast" -no-fail q.goose | grep -q "G401"
+          # A name of one function does not reach another function.
+          printf 'fn one() {\n    let c = args();\n    run(c);\n}\nfn two() {\n    let c = 1;\n    run(c);\n}\n' > sc.goose
+          "$RUNNER_TEMP/sast" -no-fail sc.goose > out.txt
+          grep -q "sc.goose:3:5.*G702" out.txt
+          if grep -q "sc.goose:7:.*G702" out.txt; then echo "a name crossed a function"; exit 1; fi
+          # A regex rule reports each match. An anchor is a fault that
+          # names the rule.
+          printf '{"rules":[{"id":"CO801","severity":"high","kind":"regex","text":"TODO\\\\([a-z]+\\\\)"}]}\n' > rx.json
+          printf 'a\n  TODO(jim) x TODO(ann)\n' > rx.goose
+          "$RUNNER_TEMP/sast" -no-fail -rules rx.json rx.goose > out.txt
+          grep -q "rx.goose:2:3.*CO801" out.txt
+          grep -q "rx.goose:2:15.*CO801" out.txt
+          printf '{"rules":[{"id":"CO802","severity":"low","kind":"regex","text":"^abc"}]}\n' > rxbad.json
+          code=0; "$RUNNER_TEMP/sast" -rules rxbad.json rx.goose 2> err.txt > /dev/null || code=$?
+          test "$code" = 2
+          grep -q "CO802" err.txt
+          # Two regex rules report under their own id. A rule never
+          # takes the id of another rule.
+          printf '{"rules":[{"id":"CO820","severity":"low","kind":"regex","text":"TODO"},{"id":"CO821","severity":"high","kind":"regex","text":"eval\\\\("}]}\n' > rx2.json
+          printf 'eval(x)\n' > rx2.goose
+          "$RUNNER_TEMP/sast" -no-fail -rules rx2.json rx2.goose > out.txt
+          grep -q "CO821" out.txt
+          if grep -q "CO820" out.txt; then echo "a regex rule took the id of another rule"; exit 1; fi
         env:
           GOOSE_HOME: ${{ runner.temp }}/goose-home
 

@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.7.2";
+import sast from "rekanalar/goose-sast@v0.8.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.7.2";
+import sast from "rekanalar/goose-sast@v0.8.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -64,6 +64,8 @@ fn main() {
 | `scan_dir_budget(dir, options, out, budget) -> i64, i64` | scans a tree against a file budget that several trees share; the caller sorts the findings |
 | `scan_reset()` | clears the state of one run: the list of the walked directories, the finding store and the bound flag. A run calls it once before it scans |
 | `read_bounded(path, max, out) -> bool` | reads a regular file of at most max bytes; false for a pipe, a device, a directory and a file that is too large |
+| `Options.report_unused` | a field: when true, `scan_text` collects the suppressions that silenced nothing |
+| `unused_text` | the rows of the unused report, one `path:line: unused suppression [ID]` per row; `scan_reset()` clears it |
 | `custom_reset()` | drops the custom rules of the run |
 | `reg_find(id) -> i64` | gives the registry index of an ID, or -1 |
 | `list_rules(out)` | writes one line per rule |
@@ -87,6 +89,7 @@ fn main() {
 | `-rules FILE` | loads custom rules from this file; the flag takes several files |
 | `-config FILE` | reads the settings of the run from this file |
 | `-no-config` | reads no config file of the current directory |
+| `-report-unused` | names each suppression that silenced nothing, on the error output; the exit code does not change |
 | `-policy FILE` | runs the dependency checks with this policy |
 | `-advisories FILE` | runs the advisory check with this file |
 | `-quiet` | prints nothing; the exit code stays |
@@ -152,9 +155,13 @@ The command reads the file `.goose-sast.json` of the current directory. A checko
 
 A comment on the line of a finding silences it. `// nosec`, `// noqa` and `// nosemgrep` all work. A list of rule IDs after the word limits the comment to those rules. An alias ID counts as its rule.
 
+A comment that stands alone on its line may silence the line below it. `// nosec:next` and `// goose-sast:disable-next-line` both work, like `eslint-disable-next-line` of ESLint. A list of rule IDs after the word limits the comment to those rules. A directive with no list covers every rule. The directive covers the one line that follows it. A directive at the end of a file covers nothing, and so does a comment that trails code.
+
 A block suppression covers many lines. A comment with `// nosec:start` opens one, and a comment with `// nosec:end` closes it. `// goose-sast:disable` and `// goose-sast:enable` are the same thing under other names. A marker with no end reaches the last line of the file.
 
-A directive with a rule list covers those rules only. `// goose-sast:disable G101, G102` silences the two rules until the matching enable. Two disables of one rule with one enable close the first open range. A list of IDs that no rule carries opens no range and the run says nothing about it.
+A directive with a rule list covers those rules only. `// goose-sast:disable G101, G102` silences the two rules until the matching enable. Two disables of one rule with one enable close the first open range. A list of IDs that no rule carries opens no range, so a typo never hides a finding.
+
+The flag `-report-unused` lists each suppression that silenced nothing. Ruff (RUF100) and golangci-lint (`nolintlint`) have the same report. A comment with a list gives one row for each ID that matched nothing. A block that matched nothing gives the line that opened it. An ID that no rule carries gives no row. The report is off by default, and it does not change the exit code.
 
 ## Custom rules
 
@@ -175,10 +182,12 @@ A file of custom rules adds rules without a change to the package. The file is J
 |---|---|
 | `id` | the rule ID; an ID that the built-in rules hold is a fault |
 | `severity` | `low`, `medium`, `high` or `critical` |
-| `kind` | `ident` reads identifiers, `string` reads string literals, `comment` reads comments |
-| `text` | what the rule looks for |
+| `kind` | `ident` reads identifiers, `string` reads string literals, `comment` reads comments, `regex` searches the text of the file |
+| `text` | what the rule looks for; for the kind `regex`, the expression |
 | `exact` | true matches the whole token; false matches a part |
 | `message` | the message of the finding |
+
+A rule of the kind `regex` searches the whole text of each file, like the `pattern-regex` of semgrep. It reports the line and the column of each match, using the regex engine of the standard library. The engine refuses the anchors `^` and `$` and the flag `(?m)`. A rule that holds one is a fault that names the rule. semgrep accepts them. Match one line with the text around the shape instead.
 
 A custom rule joins the registry. The filters, the suppressions and the exit code treat it like a built-in rule. Several `-rules` files merge. The rules of each file join the rules of the earlier files. A rule ID that two files hold is a fault that names the ID. A file that faults leaves the rules of the run as they were.
 
@@ -221,8 +230,9 @@ The dependency checks report under their own IDs.
 
 - The rules read the source as text. A name that a program builds at run time stays invisible.
 - The tokenizer holds strings, comments, identifiers and numbers. It does not parse the language, so a rule that needs types does not exist.
-- G401 and G404 read one token before and one token after a name. They report a call form only. A call through a function value or an alias stays invisible.
-- The scope rules use the brace depth. A name of a deeper scope hides the name of an outer scope. A name of a sibling scope still matches.
+- G401 and G404 report a bare call and a qualified call, such as `md5::sum(x)` and `rand::int(n)`. The language stores no function value, so no name can hold the weak function. gosec and bandit resolve the import alias in the same way. Only semgrep follows a function value, and Goose has none to follow.
+- The taint rules read the braces of the file, not a parser. Each open brace makes a scope. A name is visible in its scope and in the scopes inside it. A name of a sibling scope stays out, like the scope model of ESLint. A brace in a string or a comment does not count. A rebinding of a name does not clear an earlier taint of the same scope.
+- The credential rule G101 reads one line. A name and its literal sit on the same line. A secret name of one function misses a literal of another.
 - Most rules of the references have no Goose surface. The standard library holds no TLS, HTTP, SQL, archive or template code. The package leaves those rules out.
 - The advisory file holds the advisories of Rust packages. No Goose advisory database exists. The package reads the RustSec file format and reports the hits of the package names that match.
 - The tool runs offline. It reads no network and holds no database of its own.
@@ -244,6 +254,12 @@ The dependency checks report under their own IDs.
 - The output writes each byte outside printable ASCII as `\xNN`. A hostile path cannot inject a control sequence into a terminal.
 - A file that the scan cannot read counts as skipped. The summary line shows the count, so a skipped file never hides.
 - The scan runs no code from the files it reads.
+- A regex rule uses the regex engine of the standard library. That engine bounds its states, its instructions and its repeat counts. A pattern with a counted repeat above the bound is a fault at load. A rule file that faults leaves no expression behind.
+- A regex rule compiles once, when the rule file loads, and not once per file. The matches of one file stop at the bound of the findings of a run. The line count is one pass over the bytes, so many matches cost linear time.
+- A run holds at most 1024 custom rules. A file that goes past the bound is a fault. An empty regex match reports once, at the start of the file.
+- A rule file is trusted input, like a config file. A project that scans untrusted checkouts should load rule files from a path it controls.
+- A suppression covers only what it names. The next-line directive covers one line and never a range. A comment that trails code covers nothing next to it.
+- The unused report writes each byte outside printable ASCII as `\xNN`, so a hostile path cannot inject a control sequence.
 - The config file is read once per run. Its size is bounded like the size of a source file. A file that does not parse is a fault, never a silent default.
 - The command reads no pipe, no device and no directory. A file that is no regular file ends the run with exit code 2. The size of a file is read before its bytes, so a file above the bound never reaches the memory.
 - The count of the findings of a run is bounded at 65536. A run that reaches the bound says so on the error output. The count in the summary is then a lower bound.

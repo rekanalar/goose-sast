@@ -510,6 +510,139 @@ fn main() {
     check(sast::reg_find("CO900") < 0, "the faulty file leaves no rule");
     sast::custom_reset();
 
+    // The next-line directive covers the line below it and no other.
+    check(count_rule("// nosec:next\nlisten(\"0.0.0.0\", p);\n", "G102") == 0, "next-line directive covers the line below");
+    check(count_rule("// goose-sast:disable-next-line\nlisten(\"0.0.0.0\", p);\n", "G102") == 0, "next-line long form");
+    check(count_rule("// nosec:next G102\nlisten(\"0.0.0.0\", p);\n", "G102") == 0, "next-line with the rule");
+    check(count_rule("// nosec:next B104\nlisten(\"0.0.0.0\", p);\n", "G102") == 0, "next-line with an alias");
+    check(count_rule("// nosec:next G204\nlisten(\"0.0.0.0\", p);\n", "G102") == 1, "next-line with another rule reports");
+    check(count_rule("// nosec:next G999\nlisten(\"0.0.0.0\", p);\n", "G102") == 1, "next-line with an unknown ID covers nothing");
+    check(count_rule("// nosec:next\nlet a = 1;\nlisten(\"0.0.0.0\", p);\n", "G102") == 1, "next-line covers one line only");
+    check(count_rule("listen(\"0.0.0.0\", p);\n// nosec:next\n", "G102") == 1, "next-line on the last line covers nothing");
+    check(count_rule("listen(\"0.0.0.0\", p); // nosec:next\nlet a = 1;\n", "G102") == 1, "a trailing next-line comment covers nothing");
+    check(count_rule("// nosec:next\nlet a = 1;\n// nosec:next\nlisten(\"0.0.0.0\", p);\n", "G102") == 0, "two directives cover two lines");
+
+    // The unused report names the suppressions that silenced nothing.
+    var ud = sast::default_options();
+    ud.report_unused = true;
+    var ufs: sast::Finding[>..] = [];
+    sast::findings_reset();
+    sast::unused_text.resize(0, 0);
+    sast::scan_text("src/u.goose", "// nosec G102\nlet a = 1; // nosec G102,G204\nlisten(\"0.0.0.0\", p);\n// nosec:next G204\nlet b = 2;\n// nosec:next\nlet c = 3;\n// nosec:next G999\nlet d = 4;\n", ud, ufs);
+    let rows = sast::unused_text[..];
+    check(sast::has_word(rows, "src/u.goose:1: unused suppression [G102]"), "unused same-line ID");
+    check(sast::has_word(rows, "src/u.goose:2: unused suppression [G102]"), "unused first ID of a list");
+    check(sast::has_word(rows, "src/u.goose:2: unused suppression [G204]"), "unused second ID of a list");
+    check(sast::has_word(rows, "src/u.goose:4: unused suppression [G204]"), "unused next-line ID");
+    check(sast::has_word(rows, "src/u.goose:6: unused suppression\n"), "unused next-line with no list");
+    check(!sast::has_word(rows, "G999"), "an ID no rule carries gives no row");
+    sast::unused_text.resize(0, 0);
+    sast::scan_text("src/v.goose", "// nosec:next\nlisten(\"0.0.0.0\", p);\n", ud, ufs);
+    check(sast::unused_text.len == 0, "a used suppression gives no row");
+    sast::scan_text("src/w.goose", "// nosec:start G102\nlisten(\"0.0.0.0\", p);\n// nosec:end\n// nosec:start G204\nlet a = 1;\n// nosec:end\n", ud, ufs);
+    check(sast::has_word(sast::unused_text[..], "src/w.goose:4: unused suppression [G204]"), "unused block names its opening line");
+    check(!sast::has_word(sast::unused_text[..], "src/w.goose:1:"), "a used block gives no row");
+    ud.report_unused = false;
+    sast::unused_text.resize(0, 0);
+    sast::scan_text("src/x.goose", "// nosec G102\nlet a = 1;\n", ud, ufs);
+    check(sast::unused_text.len == 0, "the report is off by default");
+
+    // A call through the module name reports.
+    check(count_rule("let a = md5::sum(x);\n", "G401") == 1, "qualified weak hash");
+    check(count_rule("let a = sha1::digest(x);\n", "G401") == 1, "qualified sha1");
+    check(count_rule("let a = other::sum(x);\n", "G401") == 0, "another module is no weak hash");
+    check(count_rule("let a = md5::sum;\n", "G401") == 0, "a qualified name with no call");
+    check(count_rule("let a = \"md5::sum(x)\"; // md5::sum(y)\n", "G401") == 0, "a string and a comment hold no call");
+    check(count_rule("let a = md5::md5(x);\n", "G401") == 1, "a weak name behind a weak module reports once");
+    check(count_rule("let a = rand::int(10);\n", "G404") == 1, "qualified weak random");
+    check(count_rule("let a = crypto::int(10);\n", "G404") == 0, "another module is no weak random");
+
+    // A name of one scope stays out of a sibling scope.
+    let two_fn = "fn one() {\n    let cmd = args();\n    run(cmd);\n}\nfn two() {\n    let cmd = \"ls\";\n    run(cmd);\n}\n";
+    check(count_rule(two_fn, "G702") == 1, "sibling functions: one finding");
+    var sib_line: i64 = 0;
+    var sfs: sast::Finding[>..] = [];
+    sast::findings_reset();
+    sast::scan_text("src/s.goose", two_fn, sast::default_options(), sfs);
+    for f in sfs { if f.rule == sast::reg_find("G702") { sib_line = f.line; } }
+    check(sib_line == 3, "the finding sits in the function that holds the value");
+    check(count_rule("fn a() {\n    let x = args();\n    if true {\n        run(x);\n    }\n}\n", "G702") == 1, "an outer name reaches an inner scope");
+    check(count_rule("fn a() {\n    if true {\n        let x = args();\n    }\n    run(x);\n}\n", "G702") == 0, "an inner name does not reach the outer scope");
+    check(count_rule("fn a() {\n    if true {\n        let x = args();\n    }\n    if true {\n        run(x);\n    }\n}\n", "G702") == 0, "two blocks of one function are siblings");
+    check(count_rule("fn a() { let password = 1; }\nfn b() {\n    let k = \"abcdefgh\";\n}\n", "G101") == 0, "a secret name and a literal of two functions");
+
+    // A regex rule reports every match with its line and column.
+    var rxe: u8[>..] = [];
+    var rxj: u8[>..] = [];
+    for c in "{\"rules\":[{\"id\":\"CO801\",\"severity\":\"high\",\"kind\":\"regex\",\"text\":\"TODO\\\\([a-z]+\\\\)\"}]}" { rxj.push(c); }
+    check(sast::read_custom(rxj[..], rxe), "a regex rule file reads");
+    check(count_rule("a\n  TODO(jim) x TODO(ann)\nnone\n", "CO801") == 2, "a regex rule reports both matches");
+    check(count_rule("nothing here\n", "CO801") == 0, "a regex rule reports nothing without a match");
+    var rfs: sast::Finding[>..] = [];
+    sast::findings_reset();
+    sast::scan_text("src/r.goose", "a\n  TODO(jim) x TODO(ann)\n", sast::default_options(), rfs);
+    var rl: i64 = 0;
+    var rc: i64 = 0;
+    for f in rfs { if f.rule == sast::reg_find("CO801") && f.col > 3 { rl = f.line; rc = f.col; } }
+    check(rl == 2 && rc == 15, "a regex match holds the line and the column");
+    var rxf: u8[>..] = [];
+    var rxbad: u8[>..] = [];
+    for c in "{\"rules\":[{\"id\":\"CO802\",\"severity\":\"low\",\"kind\":\"regex\",\"text\":\"^abc\"}]}" { rxbad.push(c); }
+    let rx_before = sast::rule_count();
+    check(!sast::read_custom_more(rxbad[..], rxf), "an anchor is a fault");
+    check(sast::has_word(rxf[..], "CO802"), "the fault names the rule");
+    check(sast::rule_count() == rx_before, "a regex fault leaves the registry as it was");
+    var rxbad2: u8[>..] = [];
+    var rxf2: u8[>..] = [];
+    for c in "{\"rules\":[{\"id\":\"CO803\",\"severity\":\"low\",\"kind\":\"regex\",\"text\":\"a(\"}]}" { rxbad2.push(c); }
+    check(!sast::read_custom_more(rxbad2[..], rxf2), "an expression that does not parse is a fault");
+    sast::custom_reset();
+    check(count_rule("TODO(jim)\n", "CO801") == 0, "the reset drops the regex rules");
+
+    // Two regex rules report under their own id.
+    var twoj: u8[>..] = [];
+    var twoe: u8[>..] = [];
+    for c in "{\"rules\":[{\"id\":\"CO820\",\"severity\":\"low\",\"kind\":\"regex\",\"text\":\"TODO\"},{\"id\":\"CO821\",\"severity\":\"high\",\"kind\":\"regex\",\"text\":\"eval\\\\(\"}]}" { twoj.push(c); }
+    check(sast::read_custom(twoj[..], twoe), "two regex rules read");
+    check(count_rule("TODO(jim)\n", "CO820") == 1, "the first regex rule reports under its own id");
+    check(count_rule("TODO(jim)\n", "CO821") == 0, "the first rule does not report under the second id");
+    check(count_rule("eval(x)\n", "CO821") == 1, "the second regex rule reports under its own id");
+    check(count_rule("eval(x)\n", "CO820") == 0, "the second rule does not report under the first id");
+    sast::custom_reset();
+
+    // An empty match reports once, at the start of the file.
+    var emj: u8[>..] = [];
+    var eme: u8[>..] = [];
+    for c in "{\"rules\":[{\"id\":\"CO810\",\"severity\":\"low\",\"kind\":\"regex\",\"text\":\"z*\"}]}" { emj.push(c); }
+    check(sast::read_custom(emj[..], eme), "an empty-matching rule reads");
+    check(count_rule("abc\ndef\n", "CO810") == 1, "an empty match reports once");
+    // A run holds a bounded count of custom rules.
+    var many: u8[>..] = [];
+    for c in "{\"rules\":[" { many.push(c); }
+    var mi: i64 = 0;
+    while mi < 1100 {
+        if mi > 0 { many.push(44); }
+        format(many, "{\"id\":\"CM", mi, "\",\"severity\":\"low\",\"kind\":\"ident\",\"text\":\"zzq", mi, "\"}");
+        mi = mi + 1;
+    }
+    for c in "]}" { many.push(c); }
+    var mer: u8[>..] = [];
+    check(!sast::read_custom(many[..], mer), "more than 1024 custom rules is a fault");
+    check(sast::has_word(mer[..], "1024"), "the fault names the bound");
+    // The matches of one file stop at the bound of the findings.
+    var flood: u8[>..] = [];
+    var fj: u8[>..] = [];
+    var fe: u8[>..] = [];
+    for c in "{\"rules\":[{\"id\":\"CO811\",\"severity\":\"low\",\"kind\":\"regex\",\"text\":\"a\"}]}" { fj.push(c); }
+    check(sast::read_custom(fj[..], fe), "the flood rule reads");
+    var fi: i64 = 0;
+    while fi < 70000 { flood.push(97); fi = fi + 1; }
+    var ffs: sast::Finding[>..] = [];
+    sast::findings_reset();
+    let fkept = sast::scan_text("src/f.goose", flood[..], sast::default_options(), ffs);
+    check(ffs.len == 65536 && fkept == 65536, "the matches of one file stop at the bound");
+    sast::custom_reset();
+
     if fails > 0 { abort("some checks failed"); }
     print("all sast checks pass");
 }

@@ -1,30 +1,30 @@
 // The taint rules: a value from an outside source reaches a process call
 // or a file path. The taint map holds the names that carry such a
-// value, and the brace depth where each name was bound.
+// value, and the scope where each name was bound.
 namespace sast;
 
 // The taint map of the last file. Each entry holds a name and the
-// depth of the scope that bound it.
+// scope that bound it.
 var taint_at: i64[>..] = [];
 var taint_end: i64[>..] = [];
-var taint_depth: i64[>..] = [];
+var taint_scope: i64[>..] = [];
 var taint_buf: u8[>..] = [];
 
 // taint_reset empties the taint map.
 fn taint_reset() {
     taint_at.resize(0, 0);
     taint_end.resize(0, 0);
-    taint_depth.resize(0, 0);
+    taint_scope.resize(0, 0);
     taint_buf.resize(0, 0);
 }
 
 // taint_push records that the name holds a value from a source, in the
-// scope of the given depth.
-fn taint_push(name: const u8[:], depth: i64) {
+// given scope.
+fn taint_push(name: const u8[:], scope: i64) {
     taint_at.push(taint_buf.len);
     for b in name { taint_buf.push(b); }
     taint_end.push(taint_buf.len);
-    taint_depth.push(depth);
+    taint_scope.push(scope);
 }
 
 // taint_name gives the name of the taint entry i.
@@ -33,19 +33,17 @@ fn taint_name(i: i64) -> const u8[:] {
 }
 
 // taint_live reports whether the name holds a tainted value in the
-// scope of the depth. A name bound in a deeper scope shadows the name
-// of an outer scope, so the deepest binding wins.
-fn taint_live(name: const u8[:], depth: i64) -> bool {
-    var best: i64 = -1;
+// scope. A binding counts when its scope is the scope or holds it, so
+// a name of a sibling scope never reaches the use.
+fn taint_live(name: const u8[:], scope: i64) -> bool {
     var i: i64 = 0;
     while i < taint_at.len {
-        if taint_name(i) == name && taint_depth[i] <= depth
-            && taint_depth[i] > best {
-            best = taint_depth[i];
+        if taint_name(i) == name && scope_sees(taint_scope[i], scope) {
+            return true;
         }
         i = i + 1;
     }
-    return best >= 0;
+    return false;
 }
 
 // is_source_call reports whether the name is a source of outside data.
@@ -85,7 +83,7 @@ fn rule_taint(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                         && tk_kind[j + 1] == TK_OTHER
                         && (tok_of(src, j + 1) == "="
                             || tok_of(src, j + 1) == ":") {
-                        taint_push(tok_of(src, j), tk_depth[j]);
+                        taint_push(tok_of(src, j), tk_scope[j]);
                         break;
                     }
                     j = j - 1;
@@ -95,9 +93,9 @@ fn rule_taint(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
             if is_taint_sink(name) && i + 1 < tk_count
                 && tk_kind[i + 1] == TK_OTHER && tok_of(src, i + 1) == "(" {
                 var k = i + 2;
-                var depth = tk_depth[i];
+                var scope = tk_scope[i];
                 while k < tk_count && tk_line[k] <= tk_line[i] + 4 {
-                    if tk_kind[k] == TK_IDENT && taint_live(tok_of(src, k), depth) {
+                    if tk_kind[k] == TK_IDENT && taint_live(tok_of(src, k), scope) {
                         var rule = g703;
                         if name == "run" || name == "spawn" { rule = g702; }
                         rep(out, rule, file_idx, tk_line[i],

@@ -43,6 +43,11 @@ const MAX_FILES: i64 = 4096;
 const MAX_DEPTH: i64 = 64;
 const MAX_FINDINGS: i64 = 65536;
 
+// The most matches that the regex rules of one file may add. The
+// bound keeps the memory of one file in hand. The bound of the
+// findings of a run is MAX_FINDINGS.
+const MAX_FILE_MATCHES: i64 = 65536;
+
 
 // Finding is one reported defect. Every field is fixed size, so a list
 // of findings is a plain array the caller owns.
@@ -67,6 +72,7 @@ struct Options {
     max_file: i64,
     max_files: i64,
     max_depth: i64,
+    report_unused: bool,
 }
 
 // The ID lists of the run: rules to leave out, rules to keep, and path
@@ -88,6 +94,7 @@ fn default_options() -> Options {
         min_severity: SEV_LOW,
         min_confidence: CONF_LOW,
         max_file: MAX_FILE, max_files: MAX_FILES, max_depth: MAX_DEPTH,
+        report_unused: false,
     };
 }
 

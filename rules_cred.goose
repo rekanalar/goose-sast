@@ -44,8 +44,8 @@ fn name_holds_secret(name: const u8[:]) -> bool {
 }
 
 // rule_cred runs G101: a string literal bound to a secret-named name.
-// The name and the literal must sit in the same scope, so a secret name
-// of one block does not match a literal of another.
+// The name and the literal must sit on the same line, so a secret name
+// of one function does not match a literal of another.
 fn rule_cred(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {

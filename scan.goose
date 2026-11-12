@@ -15,62 +15,137 @@ fn ends_with(s: const u8[:], suffix: const u8[:]) -> bool {
 // The flag that says that the run reached the bound of the findings.
 var findings_hit_cap = false;
 
-// The block suppressions of the file. Each range holds a first line, a
-// last line and the rule it silences. A rule of -1 silences every rule.
+// The suppressions of the file. Each range holds a first line, a last
+// line, the rule it silences and the line of the comment that made
+// it. A rule of -1 silences every rule. The used flag says that a
+// finding fell in the range.
 var supp_from: i64[>..] = [];
 var supp_to: i64[>..] = [];
 var supp_rule: i64[>..] = [];
+var supp_at: i64[>..] = [];
+var supp_used: bool[>..] = [];
 
 // The ranges that a disable opened and no enable closed yet.
 var supp_open_from: i64[>..] = [];
 var supp_open_rule: i64[>..] = [];
 
+// The rows of the report of the unused suppressions. Each row holds a
+// path, a line and a rule ID. The path and the ID hold no byte outside
+// printable ASCII.
+var unused_text: u8[>..] = [];
+
 // supp_close closes one open range at the line.
 fn supp_close(at: i64, line: i64) {
-    supp_from.push(supp_open_from[at]);
-    supp_to.push(line);
-    supp_rule.push(supp_open_rule[at]);
+    supp_push(supp_open_from[at], line, supp_open_rule[at], supp_open_from[at]);
     remove_at(supp_open_from, at);
     remove_at(supp_open_rule, at);
 }
 
-// supp_read_ids reads the rule IDs of a directive. The IDs sit after
-// the word, separated by commas or spaces. An ID that no rule carries
-// stays out. It gives -1 when the comment holds tokens but no known
-// ID, so the caller opens no range. It gives 0 when no token follows
-// the word, so the caller opens every rule.
-fn supp_read_ids(text: const u8[:], at: i64, line: i64) -> i64 {
-    var s = at;
-    var read: i64 = 0;
-    var tokens: i64 = 0;
-    while s < text.len {
-        while s < text.len && (text[s] == 32 || text[s] == 44) { s = s + 1; }
-        var e = s;
-        while e < text.len && text[e] != 32 && text[e] != 44 { e = e + 1; }
-        if e > s {
-            tokens = tokens + 1;
-            let idx = reg_find(text[s..e]);
-            if idx >= 0 {
-                supp_open_from.push(line);
-                supp_open_rule.push(idx);
-                read = read + 1;
-            }
-        }
-        s = e;
-    }
-    if read == 0 && tokens > 0 { return -1; }
-    return read;
+// supp_push adds one closed range. The at column holds the line of the
+// comment that made the range.
+fn supp_push(from: i64, to: i64, rule: i64, at: i64) {
+    supp_from.push(from);
+    supp_to.push(to);
+    supp_rule.push(rule);
+    supp_at.push(at);
+    supp_used.push(false);
 }
 
-// suppress_ranges reads the block suppression comments of the source.
-// A comment with `nosec:start` or `goose-sast:disable` opens a range,
+// supp_tok gives the next token of a list and the place after it. The
+// tokens are separated by commas or spaces. An empty text means the
+// list holds no more tokens.
+fn supp_tok(text: const u8[:], at: i64) -> const u8[:], i64 {
+    var s = at;
+    while s < text.len && (text[s] == 32 || text[s] == 9 || text[s] == 44) { s = s + 1; }
+    var e = s;
+    while e < text.len && text[e] != 32 && text[e] != 9 && text[e] != 44 { e = e + 1; }
+    if e == s { return "", at; }
+    return text[s..e], e;
+}
+
+// supp_list_start gives the place where the ID list of a directive
+// starts. It gives -1 when the directive names no list, so it covers
+// every rule. The list follows a space, a colon, or both.
+fn supp_list_start(text: const u8[:], at: i64) -> i64 {
+    var s = at;
+    while s < text.len && (text[s] == 32 || text[s] == 9) { s = s + 1; }
+    if s >= text.len { return -1; }
+    if text[s] == 58 { return s + 1; }
+    if text[s] == 71 || text[s] == 66 { return s; }
+    return -1;
+}
+
+// supp_inline_at gives the place after the word of a same-line
+// directive. The colon forms of nosec are no same-line word, so a
+// block directive never silences the line it sits on. It gives -1 when
+// the comment holds no same-line word.
+fn supp_inline_at(text: const u8[:]) -> i64 {
+    var i: i64 = 0;
+    while i < text.len {
+        if i + 5 <= text.len && text[i..i + 5] == "nosec" {
+            let e = i + 5;
+            if !(e + 5 <= text.len && text[e..e + 5] == ":next")
+                && !(e + 6 <= text.len && text[e..e + 6] == ":start")
+                && !(e + 4 <= text.len && text[e..e + 4] == ":end") {
+                return e;
+            }
+        } else if i + 4 <= text.len && text[i..i + 4] == "noqa" {
+            return i + 4;
+        } else if i + 9 <= text.len && text[i..i + 9] == "nosemgrep" {
+            return i + 9;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// supp_next_at gives the place after the word of a next-line
+// directive. It gives -1 when the comment holds none.
+fn supp_next_at(text: const u8[:]) -> i64 {
+    var i: i64 = 0;
+    while i < text.len {
+        if i + 10 <= text.len && text[i..i + 10] == "nosec:next" { return i + 10; }
+        if i + 28 <= text.len
+            && text[i..i + 28] == "goose-sast:disable-next-line" {
+            return i + 28;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// supp_add adds the ranges of a directive that covers the line cover.
+// A directive with no list covers every rule. A directive with a list
+// covers the rules of the list. An ID that no rule carries covers
+// nothing, so a typo never hides a finding.
+fn supp_add(text: const u8[:], at: i64, line: i64, cover: i64) {
+    let start = supp_list_start(text, at);
+    if start < 0 {
+        supp_push(cover, cover, -1, line);
+        return;
+    }
+    var s = start;
+    while s < text.len {
+        let tok, nxt = supp_tok(text, s);
+        if tok.len == 0 { break; }
+        let idx = reg_find(tok);
+        if idx >= 0 { supp_push(cover, cover, idx, line); }
+        s = nxt;
+    }
+}
+
+// suppress_ranges reads the suppression comments of the source. A
+// comment with `nosec:start` or `goose-sast:disable` opens a range,
 // and a comment with `nosec:end` or `goose-sast:enable` closes it. A
-// directive may name rules, and then the range silences those rules
-// only. A range with no end reaches the end of the file.
+// comment with `nosec:next` covers the line below it. A comment with
+// `nosec`, `noqa` or `nosemgrep` covers its own line. A range with no
+// end reaches the end of the file.
 fn suppress_ranges(src: const u8[:]) {
     supp_from.resize(0, 0);
     supp_to.resize(0, 0);
     supp_rule.resize(0, 0);
+    supp_at.resize(0, 0);
+    supp_used.resize(0, false);
     supp_open_from.resize(0, 0);
     supp_open_rule.resize(0, 0);
     var i: i64 = 0;
@@ -78,39 +153,35 @@ fn suppress_ranges(src: const u8[:]) {
         if tk_kind[i] == TK_COMMENT {
             let text = tok_of(src, i);
             let line = tk_line[i];
-            var all_open = false;
-            var all_close = false;
-            var ids_at: i64 = -1;
-            if has_word(text, "nosec:start") || has_word(text, "goose-sast:disable") {
+            let next_at = supp_next_at(text);
+            if next_at >= 0 {
+                // Only a comment that stands alone covers the next line.
+                if i == 0 || tk_line[i - 1] != line {
+                    supp_add(text, next_at, line, line + 1);
+                }
+            } else if has_word(text, "nosec:start") || has_word(text, "goose-sast:disable") {
                 // The IDs sit after the word, when the comment holds
                 // any.
                 var k: i64 = 0;
+                var ids_at: i64 = -1;
                 while k < text.len {
                     if k + 5 <= text.len && text[k..k + 5] == "start"
                         && has_word(text, "nosec:start") {
                         ids_at = k + 5;
-                        all_open = true;
                         break;
                     }
                     if k + 7 <= text.len && text[k..k + 7] == "disable"
                         && has_word(text, "goose-sast:disable") {
                         ids_at = k + 7;
-                        all_open = true;
                         break;
                     }
                     k = k + 1;
                 }
-            } else if has_word(text, "nosec:end") || has_word(text, "goose-sast:enable") {
-                all_close = true;
-            }
-            if all_open {
-                // A range with no list silences every rule. A list of
-                // unknown IDs gives -1 and silences nothing.
                 if ids_at < 0 || supp_read_ids(text, ids_at, line) == 0 {
                     supp_open_from.push(line);
                     supp_open_rule.push(-1);
                 }
-            } else if all_close {
+            } else if has_word(text, "nosec:end") || has_word(text, "goose-sast:enable") {
                 // An enable with a list closes the ranges of those
                 // rules; an enable with no list closes every range.
                 var k: i64 = 0;
@@ -129,9 +200,7 @@ fn suppress_ranges(src: const u8[:]) {
                         while m < text.len && (text[m] == 32 || text[m] == 58) { m = m + 1; }
                         if m < text.len {
                             let rid = supp_open_rule[k];
-                            // An all-rule range closes on any named
-                            // enable only when the list holds it? No:
-                            // a named enable closes named ranges; the
+                            // A named enable closes named ranges; the
                             // all-rule range stays open.
                             if rid < 0 { k = k + 1; continue; }
                             let want = reg_id_s[rid];
@@ -152,6 +221,11 @@ fn suppress_ranges(src: const u8[:]) {
                     if !has_word(text, "enable") { break; }
                 }
             }
+            // A same-line directive covers the line of the comment.
+            let inline_at = supp_inline_at(text);
+            if inline_at >= 0 {
+                supp_add(text, inline_at, line, line);
+            }
         }
         i = i + 1;
     }
@@ -164,57 +238,77 @@ fn suppress_ranges(src: const u8[:]) {
     }
 }
 
-// in_block reports whether the rule sits in a block suppression of the
-// line. A range with a rule of -1 silences every rule.
-fn in_block(line: i64, rule_idx: i64) -> bool {
+// supp_read_ids reads the rule IDs of a block directive. The IDs sit
+// after the word, separated by commas or spaces. An ID that no rule
+// carries stays out. It gives -1 when the comment holds tokens but no
+// known ID, so the caller opens no range. It gives 0 when no token
+// follows the word, so the caller opens every rule.
+fn supp_read_ids(text: const u8[:], at: i64, line: i64) -> i64 {
+    var s = at;
+    var read: i64 = 0;
+    var tokens: i64 = 0;
+    while s < text.len {
+        let tok, nxt = supp_tok(text, s);
+        if tok.len == 0 { break; }
+        tokens = tokens + 1;
+        let idx = reg_find(tok);
+        if idx >= 0 {
+            supp_open_from.push(line);
+            supp_open_rule.push(idx);
+            read = read + 1;
+        }
+        s = nxt;
+    }
+    if read == 0 && tokens > 0 { return -1; }
+    return read;
+}
+
+// in_block reports whether the rule sits in a suppression of the line.
+// A range with a rule of -1 silences every rule. The used flag of
+// every range that covers the finding is set, so the report of the
+// unused suppressions knows which ranges silenced a finding.
+fn in_block(line: i64, rule_idx: i64, report: bool) -> bool {
+    var hit = false;
     var i: i64 = 0;
     while i < supp_from.len {
         if line >= supp_from[i] && line <= supp_to[i]
             && (supp_rule[i] < 0 || supp_rule[i] == rule_idx) {
-            return true;
+            supp_used[i] = true;
+            hit = true;
+            if !report { return true; }
         }
         i = i + 1;
     }
-    return false;
+    return hit;
 }
 
-// suppressed reports whether the line of the finding holds a suppression
-// comment that names the rule or names none. The comment holds `nosec`,
-// `noqa` or `nosemgrep`, then an optional list of rule IDs. A block
-// suppression covers the line too.
-fn suppressed(src: const u8[:], line: i64, rule_id: const u8[:], alias: const u8[:], rule_idx: i64) -> bool {
-    if in_block(line, rule_idx) { return true; }
-    let c = tok_line_comment(line);
-    if c < 0 { return false; }
-    let text = tok_of(src, c);
-    var at = -1;
+// unused_row appends one row of the unused report. The path and the
+// ID hold no byte outside printable ASCII, so a hostile path cannot
+// forge a row.
+fn unused_row(path: const u8[:], line: i64, id: const u8[:]) {
+    put_escaped(unused_text, path);
+    format(unused_text, ":", line, ": unused suppression");
+    if id.len > 0 {
+        unused_text.push(32);
+        unused_text.push(91);
+        put_escaped(unused_text, id);
+        unused_text.push(93);
+    }
+    unused_text.push(10);
+}
+
+// unused_report finds the suppressions of the file that silenced no
+// finding. A directive with a list gives one row for each rule of the
+// list that matched nothing. An ID that no rule carries gives no row.
+fn unused_report(path: const u8[:]) {
     var i: i64 = 0;
-    while i + 5 <= text.len {
-        if text[i..i + 5] == "nosec" { at = i + 5; break; }
-        if i + 4 <= text.len && text[i..i + 4] == "noqa" { at = i + 4; break; }
-        if i + 9 <= text.len && text[i..i + 9] == "nosemgrep" { at = i + 9; break; }
+    while i < supp_from.len {
+        if !supp_used[i] {
+            if supp_rule[i] < 0 { unused_row(path, supp_at[i], ""); }
+            else { unused_row(path, supp_at[i], reg_id_s[supp_rule[i]]); }
+        }
         i = i + 1;
     }
-    if at < 0 { return false; }
-    // A comment with no list suppresses every rule on the line.
-    var k = at;
-    while k < text.len && (text[k] == 32 || text[k] == 9) { k = k + 1; }
-    if k >= text.len || text[k] != 71 && text[k] != 66 && text[k] != 58 { return true; }
-    // A list: IDs separated by commas or spaces.
-    var s = k;
-    if text[s] == 58 { s = s + 1; }
-    while s < text.len {
-        while s < text.len && (text[s] == 32 || text[s] == 44) { s = s + 1; }
-        var e = s;
-        while e < text.len && text[e] != 32 && text[e] != 44 { e = e + 1; }
-        if e > s {
-            let id = text[s..e];
-            if id == rule_id { return true; }
-            if alias.len > 0 && alias_holds(alias, id) { return true; }
-        }
-        s = e;
-    }
-    return false;
 }
 
 // keep reports whether a finding passes the options: the severity, the
@@ -280,7 +374,7 @@ fn scan_text(path: const u8[:], src: const u8[:], o: Options, out: Finding[>..]&
     for f in raw {
         let id = reg_id_s[f.rule];
         let al = reg_alias_s[f.rule];
-        if suppressed(src, f.line, id, al, f.rule) {
+        if in_block(f.line, f.rule, o.report_unused) {
             continue;
         }
         if keep(o, f.rule, f.sev, f.conf) {
@@ -294,6 +388,7 @@ fn scan_text(path: const u8[:], src: const u8[:], o: Options, out: Finding[>..]&
             kept = kept + 1;
         }
     }
+    if o.report_unused { unused_report(path); }
     return kept;
 }
 
@@ -427,6 +522,7 @@ fn scan_reset() {
     vis_reset();
     findings_reset();
     findings_hit_cap = false;
+    unused_text.resize(0, 0);
 }
 
 // scan_dir_budget scans every .goose file under the directory. The

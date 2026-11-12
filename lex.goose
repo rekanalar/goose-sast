@@ -18,9 +18,12 @@ var tk_kind: i64[>..] = [];
 var tk_start: i64[>..] = [];
 var tk_end: i64[>..] = [];
 var tk_line: i64[>..] = [];
-// The brace depth of each token. The depth counts the open braces that
-// hold the token. A name of one depth is not the name of another.
-var tk_depth: i64[>..] = [];
+// The scope of each token. Scope 0 is the file. Each open brace makes a
+// new scope, and scope_parent gives the scope that holds it. Two blocks
+// of one depth are two scopes, so a name of one never reaches the other.
+var tk_scope: i64[>..] = [];
+var scope_parent: i64[>..] = [];
+var cur_scope: i64 = 0;
 var tk_count: i64 = 0;
 
 // tok_reset empties the columns before a file.
@@ -29,8 +32,22 @@ fn tok_reset() {
     tk_start.resize(0, 0);
     tk_end.resize(0, 0);
     tk_line.resize(0, 0);
-    tk_depth.resize(0, 0);
+    tk_scope.resize(0, 0);
+    scope_parent.resize(0, 0);
+    scope_parent.push(-1);
+    cur_scope = 0;
     tk_count = 0;
+}
+
+// scope_sees reports whether a name bound in the scope bound is visible
+// in the scope use: the same scope, or a scope that holds it.
+fn scope_sees(bound: i64, use: i64) -> bool {
+    var s = use;
+    while s >= 0 {
+        if s == bound { return true; }
+        s = scope_parent[s];
+    }
+    return false;
 }
 
 // tok_push appends one token.
@@ -42,10 +59,10 @@ fn tok_push(kind: i64, start: i64, end: i64, line: i64) {
     tk_count = tk_count + 1;
 }
 
-// tok_push_depth pushes one token with its brace depth.
-fn tok_push_depth(kind: i64, start: i64, end: i64, line: i64, depth: i64) {
+// tok_push_scope pushes one token with the scope that holds it.
+fn tok_push_scope(kind: i64, start: i64, end: i64, line: i64) {
     tok_push(kind, start, end, line);
-    tk_depth.push(depth);
+    tk_scope.push(cur_scope);
 }
 
 // is_ident_byte reports whether the byte sits in an identifier.
@@ -85,7 +102,6 @@ fn tokenize(src: const u8[:]) {
     tok_reset();
     var i: i64 = 0;
     var line: i64 = 1;
-    var depth: i64 = 0;
     while i < src.len {
         let b = src[i];
         if b == 10 {
@@ -97,7 +113,7 @@ fn tokenize(src: const u8[:]) {
             // A comment runs to the end of the line.
             let at = i;
             while i < src.len && src[i] != 10 { i = i + 1; }
-            tok_push_depth(TK_COMMENT, at, i, line, depth);
+            tok_push_scope(TK_COMMENT, at, i, line);
         } else if b == 34 || b == 39 {
             // A string holds its quotes. A backslash skips the next
             // byte. A string that never closes ends at the line end.
@@ -109,7 +125,7 @@ fn tokenize(src: const u8[:]) {
                 i = i + 1;
             }
             if i < src.len && src[i] == q { i = i + 1; }
-            tok_push_depth(TK_STRING, at, i, line, depth);
+            tok_push_scope(TK_STRING, at, i, line);
         } else if b >= 48 && b <= 57 {
             let at = i;
             i = i + 1;
@@ -123,23 +139,24 @@ fn tokenize(src: const u8[:]) {
                 while i < src.len && ((src[i] >= 48 && src[i] <= 57)
                     || src[i] == 46 || src[i] == 95) { i = i + 1; }
             }
-            tok_push_depth(TK_NUMBER, at, i, line, depth);
+            tok_push_scope(TK_NUMBER, at, i, line);
         } else if is_ident_byte(b) {
             let at = i;
             while i < src.len && is_ident_byte(src[i]) { i = i + 1; }
-            tok_push_depth(TK_IDENT, at, i, line, depth);
+            tok_push_scope(TK_IDENT, at, i, line);
         } else if b == 123 {
-            // An open brace raises the depth of the tokens that follow.
-            tok_push_depth(TK_OTHER, i, i + 1, line, depth);
-            depth = depth + 1;
+            // An open brace makes a scope that holds the tokens after it.
+            tok_push_scope(TK_OTHER, i, i + 1, line);
+            scope_parent.push(cur_scope);
+            cur_scope = scope_parent.len - 1;
             i = i + 1;
         } else if b == 125 {
-            // A close brace lowers the depth.
-            if depth > 0 { depth = depth - 1; }
-            tok_push_depth(TK_OTHER, i, i + 1, line, depth);
+            // A close brace leaves the scope it holds.
+            if cur_scope > 0 { cur_scope = scope_parent[cur_scope]; }
+            tok_push_scope(TK_OTHER, i, i + 1, line);
             i = i + 1;
         } else {
-            tok_push_depth(TK_OTHER, i, i + 1, line, depth);
+            tok_push_scope(TK_OTHER, i, i + 1, line);
             i = i + 1;
         }
     }

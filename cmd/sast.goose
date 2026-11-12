@@ -37,6 +37,7 @@ fn usage() {
     write_stderr("  -rules FILE                         load custom rules from this file\n");
     write_stderr("  -config FILE                        read the settings of the run from this file\n");
     write_stderr("  -no-config                          do not read .goose-sast.json\n");
+    write_stderr("  -report-unused                      name the suppressions that silenced nothing\n");
     write_stderr("  -policy FILE                        run the dependency checks with this policy\n");
     write_stderr("  -advisories FILE                    run the advisory check with this file\n");
     write_stderr("  -quiet                               no output but the exit code\n");
@@ -143,6 +144,7 @@ fn main() {
     var config_path: u8[>..] = [];
     var have_config = false;
     var no_config = false;
+    var report_unused = false;
     var target_count: i64 = 0;
     // The bits of the settings that the command line set. A setting
     // with its bit set keeps the value of the command line and the
@@ -251,6 +253,8 @@ fn main() {
             }
         } else if a[..] == "-no-config" {
             no_config = true;
+        } else if a[..] == "-report-unused" {
+            report_unused = true;
         } else if a[..] == "-quiet" {
             quiet = true;
         } else if a[..] == "-no-fail" {
@@ -334,6 +338,7 @@ fn main() {
     var scanned: i64 = 0;
     var skipped: i64 = 0;
     var budget = o.max_files;
+    o.report_unused = report_unused;
     sast::scan_reset();
     var t: i64 = 0;
     while t < target_count {
@@ -358,6 +363,12 @@ fn main() {
         t = t + 1;
     }
     sast::sort_findings(findings);
+    if sast::unused_text.len > 0 && !quiet {
+        // A path may hold control bytes, so the rows are escaped.
+        var rows: u8[>..] = [];
+        esc_control(rows, sast::unused_text[..]);
+        write_stderr(rows[..]);
+    }
     if sast::findings_hit_cap {
         write_stderr("sast: the run reached the bound of the findings; the count is a lower bound\n");
     }
