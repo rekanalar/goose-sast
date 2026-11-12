@@ -12,7 +12,7 @@ fn rep(out: Finding[>..]&, idx: i64, file_idx: i64, line: i64, col: i64,
     out.push(Finding {
         rule: idx, sev: reg_sev_s[idx], conf: reg_conf_s[idx],
         cwe: reg_cwe_s[idx], file: file_idx, line: line, col: col,
-        msg: at, msg_end: buf_texts.len,
+        msg: at, msg_end: buf_texts.len, fp: 0, fp_end: 0,
     });
 }
 

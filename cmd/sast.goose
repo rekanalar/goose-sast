@@ -45,6 +45,8 @@ fn usage() {
     write_stderr("  -no-fail                             always exit 0\n");
     write_stderr("  -list-rules                          print the rule list and exit\n");
     write_stderr("  -explain ID                          print the explanation of one rule and exit\n");
+    write_stderr("  -baseline FILE                       report only the findings the file does not hold\n");
+    write_stderr("  -update-baseline FILE                write the fingerprints of the findings to the file\n");
 }
 
 // esc_control writes the bytes of s to out. A byte outside printable
@@ -139,6 +141,10 @@ fn main() {
     var quiet = false;
     var no_fail = false;
     var list_rules = false;
+    var baseline_path: u8[>..] = [];
+    var update_path: u8[>..] = [];
+    var have_baseline = false;
+    var have_update = false;
     var explain_id: u8[>..] = [];
     var have_explain = false;
     var json_out = false;
@@ -275,6 +281,18 @@ fn main() {
             quiet = true;
         } else if a[..] == "-no-fail" {
             no_fail = true;
+        } else if a[..] == "-baseline" || a[..] == "-update-baseline" {
+            i = i + 1;
+            if i >= arg_count() { die("the flag needs a value"); }
+            var v: u8[>..] = [];
+            arg(i, v);
+            if a[..] == "-baseline" {
+                for b in v { baseline_path.push(b); }
+                have_baseline = true;
+            } else {
+                for b in v { update_path.push(b); }
+                have_update = true;
+            }
         } else if a[..] == "-explain" {
             i = i + 1;
             if i >= arg_count() { die("the flag needs a value"); }
@@ -377,6 +395,16 @@ fn main() {
     var budget = o.max_files;
     o.report_unused = report_unused;
     sast::scan_reset();
+    // The baseline file is read before the scan, so a bad file ends
+    // the run without the work of a scan.
+    if have_baseline {
+        var btext: u8[>..] = [];
+        if !sast::read_bounded(baseline_path[..], o.max_file, btext) {
+            die("cannot read the baseline file");
+        }
+        var berr: u8[>..] = [];
+        if !sast::baseline_read(btext[..], berr) { die(berr[..]); }
+    }
     var t: i64 = 0;
     while t < target_count {
         let path = target_at(t);
@@ -450,6 +478,19 @@ fn main() {
             i2 = i2 + 1;
         }
     }
+
+    // The baseline file holds the fingerprints of a past run. A
+    // finding that the file holds stays known.
+    // The update writes the findings before the filter. The file then
+    // holds every finding of the run, the old ones and the new ones.
+    if have_update {
+        var utext: u8[>..] = [];
+        sast::baseline_write(findings[..], utext);
+        if !write_file(update_path[..], utext[..]) {
+            die("cannot write the baseline file");
+        }
+    }
+    if have_baseline { sast::baseline_filter(findings); }
 
     if !quiet {
         var out: u8[>..] = [];

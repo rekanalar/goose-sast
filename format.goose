@@ -101,7 +101,8 @@ fn format_json(fs: const Finding[:], scanned: i64, skipped: i64, out: u8[>..]&) 
         json::format_key(out, "file"); json_text(out, path_of(f.file)); out.push(44);
         json::format_key(out, "line"); json::format_int(out, f.line); out.push(44);
         json::format_key(out, "column"); json::format_int(out, f.col); out.push(44);
-        json::format_key(out, "message"); json_text(out, msg_of(f));
+        json::format_key(out, "message"); json_text(out, msg_of(f)); out.push(44);
+        json::format_key(out, "fingerprint"); json::format_string(out, fp_of(f));
         out.push(125);
         i = i + 1;
     }
@@ -172,7 +173,10 @@ fn format_sarif(fs: const Finding[:], out: u8[>..]&) {
         json::format_int(out, f.line);
         out.append(",\"startColumn\":");
         json::format_int(out, f.col);
-        out.append("}}}]}");
+        out.append("}}}]");
+        out.append(",\"partialFingerprints\":{\"goose-sast/finding\":");
+        json::format_string(out, fp_of(f));
+        out.append("}}");
         i = i + 1;
     }
     out.append("]}]}");

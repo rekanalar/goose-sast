@@ -350,6 +350,8 @@ fn keep(o: Options, rule_idx: i64, sev: i64, conf: i64) -> bool {
 fn scan_text(path: const u8[:], src: const u8[:], o: Options, out: Finding[>..]&) -> i64 {
     reg_ensure();
     let file_idx = add_path(path);
+    // The hash of the path is the same for every finding of the file.
+    let path_hash = fnv64(path);
     tokenize(src);
     suppress_ranges(src);
     var raw: Finding[>..] = [];
@@ -389,7 +391,16 @@ fn scan_text(path: const u8[:], src: const u8[:], o: Options, out: Finding[>..]&
                 findings_hit_cap = true;
                 break;
             }
-            out.push(f);
+            // The fingerprint of the finding: rule, path, the text of
+            // its line. The line bytes come from the newline table.
+            let lstart, lend = nl_span(f.line);
+            let fat = buf_texts.len;
+            fingerprint_hashes(rule_hash(f.rule), path_hash,
+                               fnv64(src[lstart..lend]), buf_texts);
+            var g = f;
+            g.fp = fat;
+            g.fp_end = buf_texts.len;
+            out.push(g);
             kept = kept + 1;
         }
     }
@@ -541,6 +552,7 @@ var dirs_left_out: i64 = 0;
 fn scan_reset() {
     vis_reset();
     findings_reset();
+    baseline_reset();
     findings_hit_cap = false;
     unused_text.resize(0, 0);
     dirs_left_out = 0;

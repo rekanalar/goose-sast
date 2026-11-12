@@ -242,12 +242,15 @@ fn read_one_custom(r: json::Reader&, scratch: u8[>..]&, bad: u8[>..]&,
 }
 
 // The offsets of the newlines of the last file. The list gives the
-// line of a byte offset without a walk over the bytes.
+// line of a byte offset without a walk over the bytes. The length of
+// that file gives the end of its last line.
 var nl_at: i64[>..] = [];
+var nl_len: i64 = 0;
 
 // nl_build fills the list of the newline offsets of the text.
 fn nl_build(src: const u8[:]) {
     nl_at.resize(0, 0);
+    nl_len = src.len;
     var i: i64 = 0;
     while i < src.len {
         if src[i] == 10 { nl_at.push(i); }
@@ -268,6 +271,17 @@ fn nl_pos(at: i64) -> i64, i64 {
     var last: i64 = -1;
     if lo > 0 { last = nl_at[lo - 1]; }
     return line, at - last;
+}
+
+// nl_span gives the place of the first byte of the line and of the
+// byte after its last byte. The line counts from 1. A line of 0 gives
+// two zeros.
+fn nl_span(line: i64) -> i64, i64 {
+    if line <= 0 { return 0, 0; }
+    var start = if line == 1 { 0 } else { nl_at[line - 2] + 1 };
+    var end = nl_len;
+    if line - 1 < nl_at.len { end = nl_at[line - 1]; }
+    return start, end;
 }
 
 // run_custom applies every custom rule over the tokens of the file.

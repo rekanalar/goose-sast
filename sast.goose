@@ -24,11 +24,12 @@ import config;
 import rules_taint;
 import semver from "rekanalar/goose-semver@v1.0.1";
 import format;
+import baseline;
 import rule_docs;
 
 // The version of the package. The SARIF driver reports it, and the README
 // import line names it.
-const VERSION: const u8[:] = "0.11.0";
+const VERSION: const u8[:] = "0.12.0";
 
 // The severity order. A finding with a lower severity than the option
 // does not print and does not set the exit code.
@@ -79,6 +80,8 @@ struct Finding {
     col: i64,
     msg: i64,       // the offset in the message buffer
     msg_end: i64,
+    fp: i64,        // the offset of the fingerprint in buf_texts
+    fp_end: i64,
 }
 
 // Options holds the filters and the bounds of one run. The three ID

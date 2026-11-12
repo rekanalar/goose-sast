@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.11.0";
+import sast from "rekanalar/goose-sast@v0.12.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.11.0";
+import sast from "rekanalar/goose-sast@v0.12.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -106,6 +106,8 @@ fn main() {
 | `-no-fail` | always exits 0 |
 | `-list-rules` | prints the rule list |
 | `-explain ID` | prints the documentation of one built-in rule and exits; `-f json` prints one JSON object |
+| `-baseline FILE` | reports only the findings that the file does not hold; the exit code counts those findings |
+| `-update-baseline FILE` | writes the fingerprints of the findings to the file; the exit code is the code of the scan |
 
 The command takes several targets. It scans each target in turn. A directory target runs the walk and a file target runs the text scan. The summary line counts the files of all targets. A directory that two targets name by the same bytes is walked once. The dependency checks read the first target that is a file.
 
@@ -138,6 +140,24 @@ The text is English and it is constant. Every example is a test. The flagged exa
 
 The examples of S101 to S104 hold a placeholder. The explanation never prints a secret.
 
+## Baseline
+
+A project with old findings adopts the tool through a baseline. The flag `-baseline FILE` reports only the findings that the file does not hold. The exit code counts those findings, so a tree with no new fault exits 0.
+
+The flag `-update-baseline FILE` writes the fingerprints of the findings to the file. The exit code stays the code of the scan: 0 with no finding and 1 with findings. Use `-no-fail` for 0.
+
+A fingerprint holds 48 bytes of lowercase hexadecimal. It holds three hashes of 16 bytes each: the rule ID, the path and the text of the line. The hash is FNV-1a 64. It is stable across runs. Two different findings can share a fingerprint in a tree of many millions of lines.
+
+The hash has no key. A line that holds a secret gives a hash that a reader can test guesses against. A baseline file or a SARIF upload of such a line holds a verifier for that secret. The source of the line holds the secret too. A copy of the baseline alone is the only new exposure. Keep the baseline file beside the source.
+
+A line above a finding does not change its fingerprint. A change of the line of the finding does. A finding that moved to another file is new, because the path is part of the fingerprint.
+
+The baseline holds no timestamp and no version. A change of the rule set gives new fingerprints. A project with a new rule set writes a new baseline.
+
+The baseline file holds one fingerprint per line, sorted. The file is read with the same rules as a source file. It is a regular file of at most 16 MiB. A line that is not 48 bytes of lowercase hexadecimal is a fault with the line number. A file with more than 65536 lines is a fault. A file that uses the line endings of Windows is a fault.
+
+A baseline belongs to the tree that wrote it. The path is the path as the run saw it. A run from another directory, or with another spelling of the target, makes every finding new.
+
 ## Output fields
 
 The names below are a contract. A later release may add a field. It never renames or removes a field in a release that keeps the minor number. Before `v1.0.0`, a break raises the minor number. The rule IDs never change and no ID gets a second meaning.
@@ -145,12 +165,12 @@ The names below are a contract. A later release may add a field. It never rename
 | Output | Fields |
 |---|---|
 | JSON run | `findings`, `totals`, `scanned`, `skipped`, `left_out` |
-| JSON finding | `rule`, `severity`, `confidence`, `cwe`, `file`, `line`, `column`, `message` |
+| JSON finding | `rule`, `severity`, `confidence`, `cwe`, `file`, `line`, `column`, `message`, `fingerprint` |
 | JSON totals | `low`, `medium`, `high`, `critical` |
 | JSON explain | `id`, `severity`, `confidence`, `cwe`, `profile`, `explanation`, `flagged`, `clean`, `fix` |
 | SARIF driver | `name`, `version`, `rules` |
 | SARIF rule | `id`, `shortDescription`, `fullDescription`, `help`, `properties` |
-| SARIF result | `ruleId`, `level`, `message`, `locations` |
+| SARIF result | `ruleId`, `level`, `message`, `locations`, `partialFingerprints` |
 
 The SARIF driver version is the version of the package. The `rules` list holds every built-in rule.
 
@@ -327,6 +347,10 @@ The dependency checks report under their own IDs.
 - The SARIF driver version was 0.6.0 in earlier releases and now follows the package version. The SARIF rules gain `fullDescription`, `help` and `properties`. A reader that matches the old rule rows must accept these fields.
 - Ten rules have a registry row and no detector in this release: B405 to B409, B412 to B415 and G602. They report nothing. Their explanation says so. B110 reported nothing in earlier releases, because the detector read a qualified name wrongly. It now reports a `try` call with an empty first block.
 - The precision number of the test run is a fixture number. Real code gives other results.
+- The fingerprint of a finding is per tree layout. A project that moves its files writes a new baseline.
+- The hash of the fingerprint is FNV-1a 64 and it has no key. A line with a secret gives a hash that a reader can test guesses against. The baseline file of such a line holds a verifier for that secret.
+- A baseline file is not tamper-evident. An attacker who can change a baselined line can keep it hidden. Review the changes of a baseline file like the changes of the source.
+- A baseline file with the line endings of Windows is a fault. The tool writes the line endings of the system that wrote it.
 
 ## Secret shapes
 
@@ -361,6 +385,7 @@ src/deploy.goose:12:10: critical: S101: an AWS access key ID is in the source
 
 ## Security
 
+- The baseline file is hostile input. Its size is bounded like the size of a source file. Its lines are checked whole. A fault names the line number only. The fault text holds no byte of the file.
 - The `-explain` flag prints constants of the package. It reads no file. A fault names at most 16 bytes of the ID, and a byte outside printable ASCII appears as `\xNN`.
 - A newline in an unknown ID stays a newline. The escaper of the faults passes it, so a line of the fault can break. A wrapper that parses the error output line by line must expect this.
 - The default profile leaves out three rules and two directory names. It never hides them in silence. The summary line names the count of left-out directories, and the JSON output holds the same count.

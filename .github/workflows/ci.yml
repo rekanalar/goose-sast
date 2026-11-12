@@ -159,6 +159,24 @@ jobs:
           set -e
           test "$code" = 2
           if grep -q "$(printf '\001')" "$RUNNER_TEMP/esc.txt"; then echo "raw byte in a fault"; exit 1; fi
+          # The baseline holds the fingerprints of a past run. A new
+          # finding reports, a known one stays silent, and a bad line
+          # is a fault.
+          printf 'let password = "hunter2hunter2";\n' > "$RUNNER_TEMP/clean/base.goose"
+          "$RUNNER_TEMP/sast" -no-fail -update-baseline "$RUNNER_TEMP/base.txt" "$RUNNER_TEMP/clean/base.goose" > /dev/null
+          test -s "$RUNNER_TEMP/base.txt"
+          "$RUNNER_TEMP/sast" -no-fail -baseline "$RUNNER_TEMP/base.txt" "$RUNNER_TEMP/clean/base.goose" | grep -q "0 finding"
+          printf 'let password = "hunter2hunter3";\n' > "$RUNNER_TEMP/clean/new.goose"
+          "$RUNNER_TEMP/sast" -no-fail -baseline "$RUNNER_TEMP/base.txt" "$RUNNER_TEMP/clean/base.goose" "$RUNNER_TEMP/clean/new.goose" | grep -q "G101"
+          set +e
+          "$RUNNER_TEMP/sast" -baseline "$RUNNER_TEMP/base.txt" "$RUNNER_TEMP/clean/base.goose" > /dev/null; code=$?
+          set -e
+          test "$code" = 0
+          printf 'zz\n' > "$RUNNER_TEMP/badbase.txt"
+          set +e
+          "$RUNNER_TEMP/sast" -baseline "$RUNNER_TEMP/badbase.txt" "$RUNNER_TEMP/clean/base.goose" 2> /dev/null; code=$?
+          set -e
+          test "$code" = 2
           # The block suppression covers the lines between the markers.
           printf '// nosec:start\nlet a = "0.0.0.0";\n// nosec:end\n' > "$RUNNER_TEMP/clean/b.goose"
           "$RUNNER_TEMP/sast" "$RUNNER_TEMP/clean" | grep -q "0 finding"

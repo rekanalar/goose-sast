@@ -19,10 +19,17 @@ var dep_findings: Finding[>..] = [];
 fn dep_report(out: Finding[>..]&, rule: i64, msg: const u8[:]) {
     let at = buf_texts.len;
     for b in msg { buf_texts.push(b); }
+    let file = add_path("<dependencies>");
+    // A dependency finding has no line. Its fingerprint holds the
+    // rule, the path and the empty line text, so it is defined like
+    // every other fingerprint.
+    let fat = buf_texts.len;
+    fingerprint(reg_id_s[rule], path_of(file), "", buf_texts);
     out.push(Finding {
         rule: rule, sev: reg_sev_s[rule], conf: reg_conf_s[rule],
-        cwe: reg_cwe_s[rule], file: add_path("<dependencies>"),
-        line: 0, col: 0, msg: at, msg_end: buf_texts.len,
+        cwe: reg_cwe_s[rule], file: file,
+        line: 0, col: 0, msg: at, msg_end: fat,
+        fp: fat, fp_end: buf_texts.len,
     });
 }
 
