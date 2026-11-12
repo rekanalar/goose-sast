@@ -351,6 +351,58 @@ jobs:
           for f in secrets house-style comments regex; do
             "$RUNNER_TEMP/sast" -no-fail -no-config -rules "examples/rules/$f.json" examples/samples/secrets.goose > /dev/null
           done
+          # The profiles choose the rule set and the walk policy. The
+          # default profile leaves out the three rules of the strict
+          # tier, and the walk leaves out the test and the examples
+          # directories that it finds.
+          printf 'read_file(p, out);\n' > "$RUNNER_TEMP/g304.goose"
+          "$RUNNER_TEMP/sast" -no-fail "$RUNNER_TEMP/g304.goose" | grep -q "0 finding"
+          "$RUNNER_TEMP/sast" -no-fail -profile strict "$RUNNER_TEMP/g304.goose" | grep -q "G304"
+          "$RUNNER_TEMP/sast" -no-fail -profile all "$RUNNER_TEMP/g304.goose" | grep -q "G304"
+          # The include list turns a rule on in any profile.
+          "$RUNNER_TEMP/sast" -no-fail -include G304 "$RUNNER_TEMP/g304.goose" | grep -q "G304"
+          # The walk leaves out the directories that it finds. The
+          # summary names the count, and the JSON holds it too.
+          "$RUNNER_TEMP/sast" -no-fail test/walk > out.txt
+          grep -q "1 file(s) scanned" out.txt
+          grep -q "2 director(ies) left out by the profile" out.txt
+          "$RUNNER_TEMP/sast" -no-fail -profile all test/walk > out.txt
+          grep -q "3 file(s) scanned" out.txt
+          if grep -q "left out" out.txt; then echo "the profile all left out a directory"; exit 1; fi
+          "$RUNNER_TEMP/sast" -no-fail -f json test/walk | grep -q '"left_out":2'
+          # The config file holds the profile, and the flag wins over it.
+          printf '{ "profile": "all" }\n' > "$RUNNER_TEMP/prof.json"
+          "$RUNNER_TEMP/sast" -no-fail -config "$RUNNER_TEMP/prof.json" test/walk | grep -q "3 file(s) scanned"
+          "$RUNNER_TEMP/sast" -no-fail -config "$RUNNER_TEMP/prof.json" -profile default test/walk | grep -q "1 file(s) scanned"
+          # A bad profile is a fault. So are the flag given twice and a
+          # key of the wrong type.
+          set +e
+          "$RUNNER_TEMP/sast" -profile loose test/walk 2> /dev/null; code=$?
+          set -e
+          test "$code" = 2
+          set +e
+          "$RUNNER_TEMP/sast" -profile all -profile strict test/walk 2> /dev/null; code=$?
+          set -e
+          test "$code" = 2
+          printf '{ "profile": 3 }\n' > "$RUNNER_TEMP/profnum.json"
+          set +e
+          "$RUNNER_TEMP/sast" -config "$RUNNER_TEMP/profnum.json" test/walk 2> /dev/null; code=$?
+          set -e
+          test "$code" = 2
+          # The exit codes of a clean run, a run with findings and a
+          # faulty run do not change. The finding is of the default
+          # tier, so the default profile holds it.
+          printf 'let a = 1;\n' > "$RUNNER_TEMP/clean.goose"
+          printf 'let a = md5::sum(x);\n' > "$RUNNER_TEMP/found.goose"
+          code=0; "$RUNNER_TEMP/sast" "$RUNNER_TEMP/clean.goose" > /dev/null 2>&1 || code=$?
+          test "$code" = 0
+          code=0; "$RUNNER_TEMP/sast" "$RUNNER_TEMP/found.goose" > /dev/null 2>&1 || code=$?
+          test "$code" = 1
+          code=0; "$RUNNER_TEMP/sast" -bogus "$RUNNER_TEMP/clean.goose" > /dev/null 2>&1 || code=$?
+          test "$code" = 2
+          # The rule list names the profile that first holds each rule.
+          "$RUNNER_TEMP/sast" -list-rules | grep -q "profile=strict"
+          "$RUNNER_TEMP/sast" -list-rules | grep -q "profile=default"
         env:
           GOOSE_HOME: ${{ runner.temp }}/goose-home
 

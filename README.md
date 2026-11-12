@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.8.0";
+import sast from "rekanalar/goose-sast@v0.9.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.8.0";
+import sast from "rekanalar/goose-sast@v0.9.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -46,7 +46,7 @@ fn main() {
 
 | Signature | Result |
 |---|---|
-| `default_options() -> Options` | the options of a plain run; it empties the ID lists |
+| `default_options() -> Options` | the options of a plain run; it empties the ID lists and gives the default profile |
 | `scan_text(path, src, o, out) -> i64` | scans one text; appends the findings; gives the count kept |
 | `scan_dir(dir, o, out) -> i64, i64` | scans every `.goose` file under a directory; gives the files scanned and skipped |
 | `sort_findings(out)` | orders the findings by file, line, column and rule |
@@ -62,9 +62,14 @@ fn main() {
 | `read_config(text, mask, options, policy, advisories, rules, err) -> bool` | reads a config file; false on a fault |
 | `split_list(list, out)` | splits a list on commas and leaves out the empty parts |
 | `scan_dir_budget(dir, options, out, budget) -> i64, i64` | scans a tree against a file budget that several trees share; the caller sorts the findings |
-| `scan_reset()` | clears the state of one run: the list of the walked directories, the finding store and the bound flag. A run calls it once before it scans |
+| `scan_reset()` | clears the state of one run: the list of the walked directories, the finding store, the bound flag and the count of the left-out directories. A run calls it once before it scans |
 | `read_bounded(path, max, out) -> bool` | reads a regular file of at most max bytes; false for a pipe, a device, a directory and a file that is too large |
 | `Options.report_unused` | a field: when true, `scan_text` collects the suppressions that silenced nothing |
+| `Options.profile` | a field: the profile of the run; `PROFILE_DEFAULT`, `PROFILE_STRICT` or `PROFILE_ALL` |
+| `profile_of_name(name) -> i64` | gives the profile of a name, or -1 when no profile carries it |
+| `reg_tier_set(id, tier)` | sets the tier of a rule; `TIER_DEFAULT` or `TIER_STRICT` |
+| `dirs_left_out` | the count of the directories that the profile left out of the walk; `scan_reset()` clears it |
+| `secret_class(name) -> i64` | gives the class of a name: 0 none, 1 weak, 2 strong |
 | `unused_text` | the rows of the unused report, one `path:line: unused suppression [ID]` per row; `scan_reset()` clears it |
 | `custom_reset()` | drops the custom rules of the run |
 | `reg_find(id) -> i64` | gives the registry index of an ID, or -1 |
@@ -89,6 +94,7 @@ fn main() {
 | `-rules FILE` | loads custom rules from this file; the flag takes several files |
 | `-config FILE` | reads the settings of the run from this file |
 | `-no-config` | reads no config file of the current directory |
+| `-profile default\|strict\|all` | the rule set and the walk policy; the default is `default` |
 | `-report-unused` | names each suppression that silenced nothing, on the error output; the exit code does not change |
 | `-policy FILE` | runs the dependency checks with this policy |
 | `-advisories FILE` | runs the advisory check with this file |
@@ -111,6 +117,26 @@ The dependency checks set the exit code to the bitset of cargo-deny.
 
 A run with a banned package and no other finding exits 2, the code of a failed scan. A run with an advisory and no other finding exits 1, the code of a finding.
 
+## Profiles
+
+A profile names a rule set and a walk policy. Three profiles exist.
+
+| Profile | Rules | Walk |
+|---|---|---|
+| `default` | every rule except G304, G104 and B101 | leaves out the `test` and `examples` directories that it finds |
+| `strict` | every rule | leaves out the `test` and `examples` directories that it finds |
+| `all` | every rule | leaves out nothing |
+
+The default profile is the quiet one. A first run over a real project gives the findings that a reader must act on. The three rules that the default profile leaves out are common in real code and rarely a defect.
+
+The `-profile` flag chooses the profile. The config key `profile` chooses it too, and the flag wins over the key. An unknown name is a fault, and the fault names the flag or the key.
+
+The walk leaves out a directory whose name is exactly `test` or exactly `examples`. The match is exact and in lower case. A directory named `Test`, `tests` or `example` is read. A target that the user names is always scanned, even when the target is named `test`.
+
+The summary line names the directories that the profile left out. The JSON output holds the same count under the key `left_out`. The SARIF output holds no count. The command `-list-rules` names the profile that first holds each rule.
+
+An `-include` flag turns a rule on in any profile. An `-exclude` flag turns it off in any profile. The two flags never change the walk policy of the profile.
+
 ## Config file
 
 A config file holds the settings of a run. The command reads the file `.goose-sast.json` of the current directory. The `-config` flag names another file. The file is JSON:
@@ -126,7 +152,8 @@ A config file holds the settings of a run. The command reads the file `.goose-sa
   "rules": "company.json,repo.json",
   "advisories": "advisories.json",
   "max_files": 4096,
-  "max_depth": 64
+  "max_depth": 64,
+  "profile": "default"
 }
 ```
 
@@ -142,6 +169,7 @@ A config file holds the settings of a run. The command reads the file `.goose-sa
 | `advisories` | the path of an advisory file |
 | `max_files` | a whole number |
 | `max_depth` | a whole number |
+| `profile` | `default`, `strict` or `all` |
 
 A flag of the command line wins over the value of the file. The command checks every value of the file, also the values that a flag replaces.
 
@@ -197,8 +225,8 @@ The rule IDs follow the IDs of `gosec` and `bandit`, with the aliases below. Run
 
 | Rule | Defect |
 |---|---|
-| G101 (B105, B106, B107) | a credential literal beside a secret-named name |
-| G102 (B104) | a bind-all address literal |
+| G101 (B105, B106, B107) | a credential literal beside a secret-named name; a weak name needs a literal that looks like a credential |
+| G102 (B104) | a bind-all address literal in the call of `listen`, `bind`, `serve` or `accept` |
 | G103 | an `extern` declaration |
 | G109 (G115) | an `as!` cast to a smaller integer |
 | G116 (B613) | a bidirectional control character in the source |
@@ -207,12 +235,13 @@ The rule IDs follow the IDs of `gosec` and `bandit`, with the aliases below. Run
 | G203 | HTML built from a variable |
 | G204 | a process command from a variable |
 | G301, G302 (B103), G306 | a wide permission literal |
-| G303 (B108), G304, G111 | a temp path, a variable path, the root path |
+| G303 (B108), G304, G111 | a temp path, a variable path (strict), the root path |
 | G401 (B324) | a weak hash |
 | G702, G703 | a value from the command line, the environment or a file reaches a process call or a file path |
 | G404 (B311) | a weak random source |
 | G501 to G507, B401 to B415 | blocklisted imports |
-| B101 | an `assert` outside a test file |
+| B101 | an `assert` outside a test file (strict) |
+| G104 | the result of a call is dropped (strict) |
 | B110 (B112) | an empty catch body |
 | B113 | a `wait` with a zero limit |
 | B607, B609 | a partial command path, a wildcard argument |
@@ -233,6 +262,15 @@ The dependency checks report under their own IDs.
 - G401 and G404 report a bare call and a qualified call, such as `md5::sum(x)` and `rand::int(n)`. The language stores no function value, so no name can hold the weak function. gosec and bandit resolve the import alias in the same way. Only semgrep follows a function value, and Goose has none to follow.
 - The taint rules read the braces of the file, not a parser. Each open brace makes a scope. A name is visible in its scope and in the scopes inside it. A name of a sibling scope stays out, like the scope model of ESLint. A brace in a string or a comment does not count. A rebinding of a name does not clear an earlier taint of the same scope.
 - The credential rule G101 reads one line. A name and its literal sit on the same line. A secret name of one function misses a literal of another.
+- G101 splits the secret names in two sets. A strong name holds `password`, `passwd`, `passphrase`, `secret`, `token`, `apikey`, `api_key`, `privatekey` or `private_key`. It reports a literal of two bytes or more with one byte above a space. A short real password such as `admin` still reports, and a space inside is allowed.
+- A weak name holds `pass` or `pwd`. It reports a literal of eight bytes or more with no space and more than one distinct byte. The name `key` is no secret name.
+- bandit B105 reads the name only. gosec G101 reads the name and adds an entropy test. The two disagree, so the package keeps its own floor. The name test is a substring test, so `bypass` is a weak name.
+- G102 reads the callee of the call that holds the literal. It walks back at most 32 tokens to the open bracket. A literal in a nested call belongs to the inner call, so `listen(host_or("0.0.0.0"), p)` reports nothing.
+- The form `":port"` is not read. gosec resolves the call to `net.Listen` with type data. The package has none, so it reads the name of the callee. bandit B104 flags a bare literal, and the package does not copy that.
+- The summary clause counts the directories that the profile left out, not the files. A count of files needs a walk of the directory that the profile meant to skip.
+- The profile reaches the source rules. The dependency rules BAN, LICENSE, SOURCE and ADVISORY read no profile and no `-include` or `-exclude` list.
+- The default profile leaves out G304, G104 and B101. The walk leaves out the `test` and `examples` directories that it finds. A run of an earlier release reported those findings.
+- The library default changed too: `default_options()` gives the default profile. A caller that needs the old result sets `profile` to `PROFILE_ALL`.
 - Most rules of the references have no Goose surface. The standard library holds no TLS, HTTP, SQL, archive or template code. The package leaves those rules out.
 - The advisory file holds the advisories of Rust packages. No Goose advisory database exists. The package reads the RustSec file format and reports the hits of the package names that match.
 - The tool runs offline. It reads no network and holds no database of its own.
@@ -247,6 +285,11 @@ The dependency checks report under their own IDs.
 
 ## Security
 
+- The default profile leaves out three rules and two directory names. It never hides them in silence. The summary line names the count of left-out directories, and the JSON output holds the same count.
+- The command `-list-rules` marks each rule that the default leaves out. The `-profile strict` flag brings the three rules back. The `-profile all` flag brings the directories back too. The `-include` flag brings one rule back.
+- A directory or a file that the user names as a target is always scanned, whatever its name is. Only a directory that the walk finds below a target can stay out. The match of the name is exact and in lower case, so a name such as `Test` is read.
+- The summary clause holds a count and a flag name. No path reaches the terminal through it.
+- A profile name is compared whole. A name of more than 16 bytes is an unknown name, and an unknown name is a fault.
 - The scan bounds one file at 16 MiB, the walk at 4096 files and 64 directory levels. The `-max-files` and `-max-depth` flags lower both bounds.
 - The link check is one C call with one argument. A path longer than 4096 bytes counts as a link and stays out of the walk.
 - The walk skips a symbolic link and any other reparse point. A link cannot point the walk outside the tree. A path that the check cannot read counts as a link.

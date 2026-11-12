@@ -70,6 +70,7 @@ fn custom_cut(reg_len: i64, cr_len: i64) {
         reg_cwe_s.resize(reg_len, 0);
         reg_alias_s.resize(reg_len, "");
         reg_msg_s.resize(reg_len, "");
+        reg_tier_s.resize(reg_len, TIER_DEFAULT);
     }
     cr_kind.resize(cr_len, 0);
     cr_exact.resize(cr_len, false);

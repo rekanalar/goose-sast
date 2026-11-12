@@ -112,8 +112,7 @@ fn rule_proc(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {
         if tk_kind[i] == TK_IDENT && is_proc_call(tok_of(src, i))
-            && i + 1 < tk_count && tk_kind[i + 1] == TK_OTHER
-            && tok_of(src, i + 1) == "(" {
+            && is_call(src, i) {
             // The command is the first argument.
             var k = i + 2;
             while k < tk_count && tk_line[k] == tk_line[i] {

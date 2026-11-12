@@ -37,6 +37,7 @@ fn usage() {
     write_stderr("  -rules FILE                         load custom rules from this file\n");
     write_stderr("  -config FILE                        read the settings of the run from this file\n");
     write_stderr("  -no-config                          do not read .goose-sast.json\n");
+    write_stderr("  -profile default|strict|all         the rule set and the walk (default default)\n");
     write_stderr("  -report-unused                      name the suppressions that silenced nothing\n");
     write_stderr("  -policy FILE                        run the dependency checks with this policy\n");
     write_stderr("  -advisories FILE                    run the advisory check with this file\n");
@@ -145,6 +146,7 @@ fn main() {
     var have_config = false;
     var no_config = false;
     var report_unused = false;
+    var profile_set = false;
     var target_count: i64 = 0;
     // The bits of the settings that the command line set. A setting
     // with its bit set keeps the value of the command line and the
@@ -190,6 +192,17 @@ fn main() {
                 else { sast::opt_include(ids[k]); }
                 k = k + 1;
             }
+        } else if a[..] == "-profile" {
+            i = i + 1;
+            if i >= arg_count() { die("the flag needs a value"); }
+            if profile_set { die("the flag -profile appears twice"); }
+            profile_set = true;
+            var v: u8[>..] = [];
+            arg(i, v);
+            let lvl = sast::profile_of_name(v[..]);
+            if lvl < 0 { die("the flag -profile takes default, strict or all"); }
+            o.profile = lvl;
+            mask = mask | sast::CFG_PROFILE;
         } else if a[..] == "-exclude-path" {
             i = i + 1;
             if i >= arg_count() { die("the flag needs a value"); }

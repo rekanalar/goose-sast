@@ -17,6 +17,7 @@ const CFG_DEPTH: i64 = 64;
 const CFG_POLICY: i64 = 128;
 const CFG_ADV: i64 = 256;
 const CFG_RULES: i64 = 512;
+const CFG_PROFILE: i64 = 1024;
 
 // conf_of_name gives the confidence of a name. It gives -1 when no
 // confidence carries the name.
@@ -24,6 +25,16 @@ fn conf_of_name(name: const u8[:]) -> i64 {
     if name == "low" { return CONF_LOW; }
     if name == "medium" { return CONF_MEDIUM; }
     if name == "high" { return CONF_HIGH; }
+    return -1;
+}
+
+// profile_of_name gives the profile of a name. It gives -1 when no
+// profile carries the name. The compare is exact, so a name of more
+// than 16 bytes never matches.
+fn profile_of_name(name: const u8[:]) -> i64 {
+    if name == "default" { return PROFILE_DEFAULT; }
+    if name == "strict" { return PROFILE_STRICT; }
+    if name == "all" { return PROFILE_ALL; }
     return -1;
 }
 
@@ -138,6 +149,7 @@ fn config_bit(key: const u8[:]) -> i64 {
     if key == "policy" { return CFG_POLICY; }
     if key == "advisories" { return CFG_ADV; }
     if key == "rules" { return CFG_RULES; }
+    if key == "profile" { return CFG_PROFILE; }
     return 0;
 }
 
@@ -156,6 +168,7 @@ fn read_config(text: const u8[:], mask: i64, o: Options&,
     var conf: i64 = -1;
     var files: i64 = -1;
     var depth: i64 = -1;
+    var prof: i64 = -1;
     var excl: u8[>..] = [];
     var incl: u8[>..] = [];
     var paths: u8[>..] = [];
@@ -229,6 +242,17 @@ fn read_config(text: const u8[:], mask: i64, o: Options&,
                 config_bad(err, "max_depth", "a number of levels");
                 bad = true;
             } else if (mask & bit) == 0 { depth = v; }
+        } else if key == "profile" {
+            let v, ok = cfg_str(r, scratch, "profile", "a name", err);
+            if !ok {
+                bad = true;
+            } else {
+                let lvl = profile_of_name(v);
+                if lvl < 0 {
+                    config_bad(err, "profile", "default, strict or all");
+                    bad = true;
+                } else if (mask & bit) == 0 { prof = lvl; }
+            }
         } else {
             format(err, "the config file holds the unknown key ", key, "\n");
             bad = true;
@@ -244,6 +268,7 @@ fn read_config(text: const u8[:], mask: i64, o: Options&,
     if conf >= 0 { o.min_confidence = conf; }
     if files >= 0 { o.max_files = files; }
     if depth >= 0 { o.max_depth = depth; }
+    if prof >= 0 { o.profile = prof; }
     if excl.len > 0 && !apply_ids(excl[..], true, err) { return false; }
     if incl.len > 0 && !apply_ids(incl[..], false, err) { return false; }
     if paths.len > 0 { config_paths(paths[..]); }

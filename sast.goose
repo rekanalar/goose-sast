@@ -36,6 +36,18 @@ const CONF_LOW: i64 = 1;
 const CONF_MEDIUM: i64 = 2;
 const CONF_HIGH: i64 = 3;
 
+// The profiles of a run. A profile names a rule set and a walk
+// policy. The default profile reports what a reader must act on, and
+// the walk leaves out the test and example directories it finds.
+const PROFILE_DEFAULT: i64 = 0;
+const PROFILE_STRICT: i64 = 1;
+const PROFILE_ALL: i64 = 2;
+
+// The tier of a rule. A rule of the strict tier stays out of the
+// default profile. The include list turns it on again.
+const TIER_DEFAULT: i64 = 0;
+const TIER_STRICT: i64 = 1;
+
 // The bounds of one run. A bound reached is a count for the walk. For
 // the two JSON files of the dependency checks it is a fault.
 const MAX_FILE: i64 = 16777216;
@@ -73,6 +85,7 @@ struct Options {
     max_files: i64,
     max_depth: i64,
     report_unused: bool,
+    profile: i64,
 }
 
 // The ID lists of the run: rules to leave out, rules to keep, and path
@@ -95,6 +108,7 @@ fn default_options() -> Options {
         min_confidence: CONF_LOW,
         max_file: MAX_FILE, max_files: MAX_FILES, max_depth: MAX_DEPTH,
         report_unused: false,
+        profile: PROFILE_DEFAULT,
     };
 }
 
@@ -182,6 +196,7 @@ var reg_conf_s: i64[>..] = [];
 var reg_cwe_s: i64[>..] = [];
 var reg_alias_s: const u8[:][>..] = [];
 var reg_msg_s: const u8[:][>..] = [];
+var reg_tier_s: i64[>..] = [];
 
 // reg_ensure loads the registry once.
 fn reg_ensure() {
@@ -241,6 +256,11 @@ fn reg_ensure() {
     reg_put("ADVISORY", SEV_CRITICAL, CONF_HIGH, 0, "", "a dependency has a known advisory");
     reg_put("G117", SEV_MEDIUM, CONF_MEDIUM, 499, "", "a secret-named value goes into a JSON writer");
     reg_put("B415", SEV_HIGH, CONF_HIGH, 502, "", "an import of a web application bridge is in use");
+    // Three rules stay out of the default profile. Their findings
+    // are common and rarely a defect in a real project.
+    tier_set("G304", TIER_STRICT);
+    tier_set("G104", TIER_STRICT);
+    tier_set("B101", TIER_STRICT);
 }
 
 // reg_put appends one rule row.
@@ -252,6 +272,27 @@ fn reg_put(id: const u8[:], sev: i64, conf: i64, cwe: i64,
     reg_cwe_s.push(cwe);
     reg_alias_s.push(alias);
     reg_msg_s.push(msg);
+    reg_tier_s.push(TIER_DEFAULT);
+}
+
+// reg_tier_set sets the tier of the rule with that ID. It does
+// nothing when no rule carries the ID.
+fn reg_tier_set(id: const u8[:], tier: i64) {
+    reg_ensure();
+    tier_set(id, tier);
+}
+
+// tier_set sets the tier of the rule with that ID. It does not load
+// the registry, so reg_ensure can call it.
+fn tier_set(id: const u8[:], tier: i64) {
+    var i: i64 = 0;
+    while i < reg_id_s.len {
+        if reg_id_s[i] == id {
+            reg_tier_s[i] = tier;
+            return;
+        }
+        i = i + 1;
+    }
 }
 
 // reg_find gives the index of the ID s, with aliases resolved. It gives
@@ -289,14 +330,20 @@ fn rule_count() -> i64 {
 }
 
 // list_rules writes one line per rule: the ID, the severity, the
-// confidence, the CWE number, the alias and the message.
+// confidence, the CWE number, the profile that first holds the rule,
+// the alias and the message.
 fn list_rules(out: u8[>..]&) {
     reg_ensure();
     var i: i64 = 0;
     while i < reg_id_s.len {
         for b in reg_id_s[i] { out.push(b); }
         format(out, " sev=", reg_sev_s[i], " conf=", reg_conf_s[i],
-               " cwe=", reg_cwe_s[i]);
+               " cwe=", reg_cwe_s[i], " profile=");
+        if reg_tier_s[i] == TIER_STRICT {
+            for b in "strict" { out.push(b); }
+        } else {
+            for b in "default" { out.push(b); }
+        }
         if reg_alias_s[i].len > 0 {
             format(out, " alias=", reg_alias_s[i]);
         }

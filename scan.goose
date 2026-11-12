@@ -312,7 +312,7 @@ fn unused_report(path: const u8[:]) {
 }
 
 // keep reports whether a finding passes the options: the severity, the
-// confidence, the include list and the exclude list.
+// confidence, the profile, the include list and the exclude list.
 fn keep(o: Options, rule_idx: i64, sev: i64, conf: i64) -> bool {
     if sev < o.min_severity { return false; }
     if conf < o.min_confidence { return false; }
@@ -327,16 +327,20 @@ fn keep(o: Options, rule_idx: i64, sev: i64, conf: i64) -> bool {
         if al.len > 0 && alias_holds(al, got) { return false; }
         j = j + 1;
     }
-    if incl_at.len > 0 {
-        var found = opt_holds(incl_at[..], incl_end[..], id);
-        var m: i64 = 0;
-        while m < incl_at.len && !found {
-            let want = buf_opt_ids[incl_at[m]..incl_end[m]];
-            if al.len > 0 && alias_holds(al, want) { found = true; }
-            m = m + 1;
-        }
-        if !found { return false; }
+    // The default profile leaves out the rules of the strict tier. The
+    // include list turns the rule on again, because the user named it.
+    var named = opt_holds(incl_at[..], incl_end[..], id);
+    var m: i64 = 0;
+    while m < incl_at.len && !named {
+        let want = buf_opt_ids[incl_at[m]..incl_end[m]];
+        if al.len > 0 && alias_holds(al, want) { named = true; }
+        m = m + 1;
     }
+    if o.profile == PROFILE_DEFAULT && reg_tier_s[rule_idx] == TIER_STRICT
+        && !named {
+        return false;
+    }
+    if incl_at.len > 0 && !named { return false; }
     return true;
 }
 
@@ -486,7 +490,17 @@ fn scan_walk(o: Options, out: Finding[>..]&, scanned: i64&, skipped: i64&,
                     if path_is_link(path[..]) {
                         skipped = skipped + 1;
                     } else if is_dir(path[..]) {
-                        q_add(path[..], depth + 1);
+                        // The default and the strict profiles leave out
+                        // the test and the example directories that the
+                        // walk finds. The match is exact and lower
+                        // case. The target is never an entry of a
+                        // listing, so a target named test is scanned.
+                        if o.profile != PROFILE_ALL
+                            && (name == "test" || name == "examples") {
+                            dirs_left_out = dirs_left_out + 1;
+                        } else {
+                            q_add(path[..], depth + 1);
+                        }
                     } else if ends_with(name, ".goose") {
                         var src: u8[>..] = [];
                         if budget <= 0
@@ -515,6 +529,11 @@ fn scan_dir(dir: const u8[:], o: Options, out: Finding[>..]&) -> i64, i64 {
     return scanned, skipped;
 }
 
+// dirs_left_out counts the directories that the profile left out of
+// the walk. The count is a counter, and the walk never enters a
+// left-out directory. scan_reset clears it.
+var dirs_left_out: i64 = 0;
+
 // scan_reset clears the list of the directories that the walk entered.
 // A run over several trees calls it once, so a directory that two
 // targets name is walked once.
@@ -523,6 +542,7 @@ fn scan_reset() {
     findings_reset();
     findings_hit_cap = false;
     unused_text.resize(0, 0);
+    dirs_left_out = 0;
 }
 
 // scan_dir_budget scans every .goose file under the directory. The

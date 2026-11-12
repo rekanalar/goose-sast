@@ -33,14 +33,58 @@ fn has_word(text: const u8[:], word: const u8[:]) -> bool {
     return false;
 }
 
-// name_holds_secret reports whether the identifier names a credential.
-fn name_holds_secret(name: const u8[:]) -> bool {
+// The classes of a name that names a credential. A strong name needs
+// only a literal of some value. A weak name needs a literal that
+// looks like a credential.
+const SECRET_NONE: i64 = 0;
+const SECRET_WEAK: i64 = 1;
+const SECRET_STRONG: i64 = 2;
+
+// secret_class gives the class of a name. The name is lowercased and
+// read as a substring, as the rule did before. The strong list is
+// checked first, so the name password is strong and the name bypass is
+// weak. The name key is no name of a credential.
+fn secret_class(name: const u8[:]) -> i64 {
     var low: u8[>..] = [];
     lower_of(name, low);
-    return has_word(low[..], "pass") || has_word(low[..], "pwd")
-        || has_word(low[..], "secret") || has_word(low[..], "token")
-        || has_word(low[..], "apikey") || has_word(low[..], "api_key")
-        || has_word(low[..], "privatekey") || has_word(low[..], "private_key");
+    if has_word(low[..], "password") || has_word(low[..], "passwd")
+        || has_word(low[..], "passphrase") || has_word(low[..], "secret")
+        || has_word(low[..], "token") || has_word(low[..], "apikey")
+        || has_word(low[..], "api_key") || has_word(low[..], "privatekey")
+        || has_word(low[..], "private_key") {
+        return SECRET_STRONG;
+    }
+    if has_word(low[..], "pass") || has_word(low[..], "pwd") {
+        return SECRET_WEAK;
+    }
+    return SECRET_NONE;
+}
+
+// secret_literal reports whether the body of a literal holds a
+// credential of the class. A strong name needs a body of at least 2
+// bytes with one byte above 32, so a space inside is allowed. A weak
+// name needs a body of at least 8
+// bytes with no byte of 32 or less and more than one distinct byte.
+// An empty body, a body of one byte and a body of spaces never
+// report, for any name.
+fn secret_literal(body: const u8[:], class: i64) -> bool {
+    if body.len < 2 { return false; }
+    var i: i64 = 0;
+    if class == SECRET_STRONG {
+        while i < body.len {
+            if body[i] > 32 { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+    if body.len < 8 { return false; }
+    var distinct = false;
+    while i < body.len {
+        if body[i] <= 32 { return false; }
+        if body[i] != body[0] { distinct = true; }
+        i = i + 1;
+    }
+    return distinct;
 }
 
 // rule_cred runs G101: a string literal bound to a secret-named name.
@@ -49,32 +93,38 @@ fn name_holds_secret(name: const u8[:]) -> bool {
 fn rule_cred(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {
-        if tk_kind[i] == TK_IDENT && name_holds_secret(tok_of(src, i)) {
-            // The name is bound by an = or a : and takes a literal.
-            var k = i + 1;
-            var bound = false;
-            while k < tk_count && tk_line[k] == tk_line[i] {
-                if tk_kind[k] == TK_OTHER
-                    && (tok_of(src, k) == "=" || tok_of(src, k) == ":") {
-                    bound = true;
-                    break;
-                }
-                k = k + 1;
-            }
-            if bound {
-                var m = k + 1;
-                while m < tk_count && tk_line[m] == tk_line[i] {
-                    if tk_kind[m] == TK_STRING {
-                        let lit = tok_of(src, m);
-                        if lit.len > 2 {
-                            rep(out, 0, file_idx, tk_line[i],
-                                tok_col_of(src, tk_start[i]),
-                                "a credential may be hardcoded");
-                        }
+        if tk_kind[i] == TK_IDENT {
+            let class = secret_class(tok_of(src, i));
+            if class != SECRET_NONE {
+                // The name is bound by an = or a : and takes a literal.
+                var k = i + 1;
+                var bound = false;
+                while k < tk_count && tk_line[k] == tk_line[i] {
+                    if tk_kind[k] == TK_OTHER
+                        && (tok_of(src, k) == "=" || tok_of(src, k) == ":") {
+                        bound = true;
                         break;
                     }
-                    if tk_kind[m] == TK_OTHER && tok_of(src, m) == ")" { break; }
-                    m = m + 1;
+                    k = k + 1;
+                }
+                if bound {
+                    var m = k + 1;
+                    while m < tk_count && tk_line[m] == tk_line[i] {
+                        if tk_kind[m] == TK_STRING {
+                            let lit = tok_of(src, m);
+                            if lit.len > 2 {
+                                let body = lit[1..lit.len - 1];
+                                if secret_literal(body, class) {
+                                    rep(out, 0, file_idx, tk_line[i],
+                                        tok_col_of(src, tk_start[i]),
+                                        "a credential may be hardcoded");
+                                }
+                            }
+                            break;
+                        }
+                        if tk_kind[m] == TK_OTHER && tok_of(src, m) == ")" { break; }
+                        m = m + 1;
+                    }
                 }
             }
         }
@@ -82,7 +132,55 @@ fn rule_cred(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     }
 }
 
-// rule_bind runs G102: a bind-all address literal.
+// is_bind_call reports whether the identifier names a bind call. The
+// name is read in lower case, so the letter case does not matter.
+fn is_bind_call(name: const u8[:]) -> bool {
+    var low: u8[>..] = [];
+    lower_of(name, low);
+    return has_word(low[..], "listen") || has_word(low[..], "bind")
+        || has_word(low[..], "serve") || has_word(low[..], "accept");
+}
+
+// bind_callee gives the callee of the call that holds the literal at
+// the token i. It gives an empty text when the literal sits in no call.
+// The rule walks back to the open bracket that holds the literal. The
+// token before that bracket is the callee. The walk stops at a
+// statement end or at 32 tokens, so the work stays constant.
+fn bind_callee(src: const u8[:], i: i64) -> const u8[:] {
+    var depth: i64 = 0;
+    var braces: i64 = 0;
+    var k = i - 1;
+    var steps: i64 = 0;
+    while k >= 0 && steps < 32 {
+        if tk_kind[k] == TK_OTHER {
+            let t = tok_of(src, k);
+            if t == ")" { depth = depth + 1; }
+            else if t == "(" {
+                if depth == 0 {
+                    if k == 0 { return ""; }
+                    if tk_kind[k - 1] != TK_IDENT { return ""; }
+                    return tok_of(src, k - 1);
+                }
+                depth = depth - 1;
+            } else if t == "}" {
+                braces = braces + 1;
+            } else if t == "{" {
+                // A brace pair before the literal is a value of the call.
+                if braces == 0 { return ""; }
+                braces = braces - 1;
+            } else if t == ";" && braces == 0 && depth == 0 {
+                return "";
+            }
+        }
+        k = k - 1;
+        steps = steps + 1;
+    }
+    return "";
+}
+
+// rule_bind runs G102: a bind-all address literal in a bind call. The
+// literal alone is no bind, so the rule reads the callee of the call
+// that holds it.
 fn rule_bind(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
     var i: i64 = 0;
     while i < tk_count {
@@ -91,14 +189,13 @@ fn rule_bind(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
             // A string that never closed holds its quote only.
             if lit.len > 1 {
                 let body = lit[1..lit.len - 1];
-                // The literal must sit in the argument list of a call.
-                // A comparison or a build step does not bind.
-                var in_call = i > 0 && tk_kind[i - 1] == TK_OTHER
-                    && (tok_of(src, i - 1) == "(" || tok_of(src, i - 1) == ",");
-                if in_call && (body == "0.0.0.0" || body == "::"
-                    || body == "[::]") {
-                    rep(out, 1, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
-                        "the program binds to all interfaces");
+                if body == "0.0.0.0" || body == "::" || body == "[::]" {
+                    let callee = bind_callee(src, i);
+                    if callee.len > 0 && is_bind_call(callee) {
+                        rep(out, 1, file_idx, tk_line[i],
+                            tok_col_of(src, tk_start[i]),
+                            "the program binds to all interfaces");
+                    }
                 }
             }
         }
@@ -157,8 +254,7 @@ fn rule_paths(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
                     }
                 }
             }
-        } else if tk_kind[i] == TK_IDENT && i + 1 < tk_count
-            && tk_kind[i + 1] == TK_OTHER && tok_of(src, i + 1) == "(" {
+        } else if tk_kind[i] == TK_IDENT && is_call(src, i) {
             // A file call whose first argument is an identifier.
             let name = tok_of(src, i);
             if is_path_call(name) {

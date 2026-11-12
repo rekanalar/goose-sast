@@ -58,10 +58,17 @@ fn format_text(fs: const Finding[:], out: u8[>..]&) {
 
 // format_summary writes the count line of a run. It holds the count of
 // the findings, the count of the scanned files and the count of the
-// files that the walk skipped.
+// files that the walk skipped. The clause of the left-out directories
+// appears only when the profile left one out. The clause holds a count
+// and a flag name, so no path reaches the terminal.
 fn format_summary(findings: i64, scanned: i64, skipped: i64, out: u8[>..]&) {
     format(out, "sast: ", findings, " finding(s), ", scanned, " file(s) scanned, ",
-           skipped, " file(s) skipped\n");
+           skipped, " file(s) skipped");
+    if dirs_left_out > 0 {
+        format(out, ", ", dirs_left_out,
+               " director(ies) left out by the profile, use -profile all");
+    }
+    out.push(10);
 }
 
 // json_text writes s as a JSON string. A byte outside printable ASCII
@@ -109,7 +116,8 @@ fn format_json(fs: const Finding[:], scanned: i64, skipped: i64, out: u8[>..]&) 
     out.push(125);
     out.push(44);
     json::format_key(out, "scanned"); json::format_int(out, scanned); out.push(44);
-    json::format_key(out, "skipped"); json::format_int(out, skipped);
+    json::format_key(out, "skipped"); json::format_int(out, skipped); out.push(44);
+    json::format_key(out, "left_out"); json::format_int(out, dirs_left_out);
     out.push(125);
     out.push(10);
 }

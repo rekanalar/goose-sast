@@ -15,8 +15,19 @@ fn check(ok: bool, what: const u8[:]) {
 }
 
 // count_rule gives how many findings of the rule ID the text yields.
+// The helper uses the strict profile, so every rule of the package
+// runs. The default profile leaves three rules out.
 fn count_rule(src: const u8[:], id: const u8[:]) -> i64 {
     var o = sast::default_options();
+    o.profile = sast::PROFILE_STRICT;
+    return count_rule_with(src, id, o);
+}
+
+// count_rule_profile gives how many findings of the rule ID the text
+// yields under the given profile.
+fn count_rule_profile(src: const u8[:], id: const u8[:], profile: i64) -> i64 {
+    var o = sast::default_options();
+    o.profile = profile;
     return count_rule_with(src, id, o);
 }
 
@@ -30,10 +41,24 @@ fn count_rule_with(src: const u8[:], id: const u8[:], o: sast::Options) -> i64 {
     return n;
 }
 
+// scan_tree scans the tree at the path under the given profile. It
+// gives the count of the scanned files.
+fn scan_tree(path: const u8[:], profile: i64) -> i64 {
+    var o = sast::default_options();
+    o.profile = profile;
+    var fs: sast::Finding[>..] = [];
+    sast::scan_reset();
+    var budget = o.max_files;
+    let scanned, skipped = sast::scan_dir_budget(path, o, fs, budget);
+    return scanned;
+}
+
 fn main() {
     check(count_rule("let password = \"hunter2hunter2\";\n", "G101") == 1, "G101 literal");
     check(count_rule("let name = \"hello\";\n", "G101") == 0, "G101 clean");
     check(count_rule("listen(\"0.0.0.0\", p);\n", "G102") == 1, "G102 bind");
+    check(count_rule("listen(Cfg { a: 1 }, \"0.0.0.0\");\n", "G102") == 1, "G102 brace value before the literal");
+    check(count_rule("f(); { listen(\"x\"); } let a = \"0.0.0.0\";\n", "G102") == 0, "G102 closed block is no call");
     check(count_rule("let a = \"0.0.0.0\";\n", "G102") == 0, "G102 no bind call");
     check(count_rule("let a = \"127.0.0.1\";\n", "G102") == 0, "G102 loopback");
     check(count_rule("put(out, \":86:\");\n", "G102") == 0, "G102 port tag text");
@@ -641,6 +666,115 @@ fn main() {
     sast::findings_reset();
     let fkept = sast::scan_text("src/f.goose", flood[..], sast::default_options(), ffs);
     check(ffs.len == 65536 && fkept == 65536, "the matches of one file stop at the bound");
+    sast::custom_reset();
+
+    // The profiles. The default profile leaves three rules out, and the
+    // walk leaves out the test and the example directories it finds.
+    check(count_rule_profile("read_file(p, out);\n", "G304",
+        sast::PROFILE_DEFAULT) == 0, "the default profile leaves G304 out");
+    check(count_rule_profile("write_file(\"a\", d);\n", "G104",
+        sast::PROFILE_DEFAULT) == 0, "the default profile leaves G104 out");
+    check(count_rule_profile("assert(x > 0);\n", "B101",
+        sast::PROFILE_DEFAULT) == 0, "the default profile leaves B101 out");
+    check(count_rule_profile("read_file(p, out);\n", "G304",
+        sast::PROFILE_STRICT) == 1, "the strict profile holds G304");
+    check(count_rule_profile("write_file(\"a\", d);\n", "G104",
+        sast::PROFILE_STRICT) == 1, "the strict profile holds G104");
+    check(count_rule_profile("assert(x > 0);\n", "B101",
+        sast::PROFILE_STRICT) == 1, "the strict profile holds B101");
+    check(count_rule_profile("let a = md5::sum(x);\n", "G401",
+        sast::PROFILE_DEFAULT) == 1, "a rule of the default tier runs");
+
+    // The walk leaves out the test and the example directories that it
+    // finds below the target. The profile all reads them.
+    check(scan_tree("test/walk", sast::PROFILE_DEFAULT) == 1,
+        "the default profile leaves out the two directories");
+    check(sast::dirs_left_out == 2, "the count of the left-out directories");
+    check(scan_tree("test/walk", sast::PROFILE_STRICT) == 1,
+        "the strict profile leaves out the two directories");
+    check(scan_tree("test/walk", sast::PROFILE_ALL) == 3,
+        "the profile all reads the two directories");
+    // A target that the user names is always scanned.
+    check(scan_tree("test/walk/test", sast::PROFILE_DEFAULT) == 1,
+        "a target named test is scanned");
+    check(scan_tree("test/walk/examples", sast::PROFILE_DEFAULT) == 1,
+        "a target named examples is scanned");
+
+    // The summary holds the clause of the left-out directories, and the
+    // JSON holds the same count under the key left_out.
+    var sum: u8[>..] = [];
+    sast::scan_reset();
+    var sfs: sast::Finding[>..] = [];
+    var sbudget: i64 = 4096;
+    let sscanned, sskipped = sast::scan_dir_budget("test/walk", sast::default_options(), sfs, sbudget);
+    sast::format_summary(sfs.len, sscanned, sskipped, sum);
+    check(sast::has_word(sum[..], "director(ies) left out by the profile, use -profile all"),
+        "the summary holds the clause");
+    check(sast::has_word(sum[..], "2 director(ies)"), "the clause holds the count");
+    var jout: u8[>..] = [];
+    sast::format_json(sfs[..], sscanned, sskipped, jout);
+    check(sast::has_word(jout[..], "\"left_out\":2"), "the JSON holds the count");
+    // A run that leaves out nothing holds no clause.
+    var s2: u8[>..] = [];
+    sast::scan_reset();
+    var s2fs: sast::Finding[>..] = [];
+    var s2budget: i64 = 4096;
+    let s2scanned, s2skipped = sast::scan_dir_budget("test/walk/a.goose", sast::default_options(), s2fs, s2budget);
+    sast::format_summary(s2fs.len, s2scanned, s2skipped, s2);
+    if sast::has_word(s2[..], "left out") {
+        check(false, "a run that leaves out nothing holds no clause");
+    }
+
+    // The rule list names the profile that first holds each rule.
+    var lr: u8[>..] = [];
+    sast::list_rules(lr);
+    check(sast::has_word(lr[..], "G304 sev=2 conf=3 cwe=22 profile=strict"),
+        "the list marks the strict rules");
+    check(sast::has_word(lr[..], "G102 sev=2 conf=3 cwe=605 profile=default"),
+        "the list marks the default rules");
+
+    // A function declaration is no call.
+    check(count_rule("fn run(cmd: const u8[:], args: u8[:]) -> i64 {\n", "G204") == 0, "G204 a declaration");
+    check(count_rule("fn read_file(p: const u8[:]) {\n", "G304") == 0, "G304 a declaration");
+    check(count_rule("let r = run(cmd, args);\n", "G204") == 1, "G204 a call");
+
+    // The G102 rule needs a bind call.
+    check(count_rule("listen(\"0.0.0.0\", p);\n", "G102") == 1, "G102 listen");
+    check(count_rule("serve(\"::\", p);\n", "G102") == 1, "G102 serve");
+    check(count_rule("s.Accept(\"[::]\");\n", "G102") == 1, "G102 accept");
+    check(count_rule("listen(\n\"0.0.0.0\", p);\n", "G102") == 1, "G102 call over two lines");
+    check(count_rule("out.append(\"::\");\n", "G102") == 0, "G102 no bind call");
+    check(count_rule("let a = \"0.0.0.0\";\n", "G102") == 0, "G102 no call");
+    check(count_rule("listen(\"127.0.0.1\", p);\n", "G102") == 0, "G102 loopback");
+    check(count_rule("listen(host_or(\"0.0.0.0\"), p);\n", "G102") == 0, "G102 nested call");
+
+    // The G101 rule needs a credential-like literal.
+    check(count_rule("let password = \"admin\";\n", "G101") == 1, "G101 strong name");
+    check(count_rule("let token = \"abcdef123456\";\n", "G101") == 1, "G101 token");
+    check(count_rule("let pass = \"hunter2hunter2\";\n", "G101") == 1, "G101 weak name");
+    check(count_rule("let pass = \" \";\n", "G101") == 0, "G101 a space");
+    check(count_rule("let pass = \"abc1234\";\n", "G101") == 0, "G101 a short weak literal");
+    check(count_rule("let pass = \"aaaaaaaa\";\n", "G101") == 0, "G101 one repeated byte");
+    check(count_rule("let pass = \"abc defgh\";\n", "G101") == 0, "G101 a space inside");
+    check(count_rule("let password = \"a\";\n", "G101") == 0, "G101 one byte");
+    check(count_rule("let password = \"\";\n", "G101") == 0, "G101 an empty literal");
+    check(count_rule("let password = \"  \";\n", "G101") == 0, "G101 spaces only");
+    check(count_rule("let bypass = \"abcdefgh\";\n", "G101") == 1, "G101 bypass is weak");
+    check(count_rule("let key = \"abcdefgh\";\n", "G101") == 0, "G101 key is no name");
+    // A strong name reports a body with a space inside. A body of spaces
+    // only reports nothing.
+    check(count_rule("let password = \"my pass\";\n", "G101") == 1, "G101 strong name, space inside");
+    check(count_rule("let token = \"  x\";\n", "G101") == 1, "G101 strong name, leading spaces");
+    check(count_rule("let secret = \"   \";\n", "G101") == 0, "G101 strong name, spaces only");
+
+    // A custom rule runs in every profile.
+    var cpj: u8[>..] = [];
+    var cpe: u8[>..] = [];
+    for c in "{\"rules\":[{\"id\":\"CO830\",\"severity\":\"low\",\"kind\":\"ident\",\"text\":\"zzprof\"}]}" { cpj.push(c); }
+    check(sast::read_custom(cpj[..], cpe), "the profile rule reads");
+    check(count_rule_profile("zzprof(x);\n", "CO830", sast::PROFILE_DEFAULT) == 1, "a custom rule runs in the default profile");
+    check(count_rule_profile("zzprof(x);\n", "CO830", sast::PROFILE_STRICT) == 1, "a custom rule runs in the strict profile");
+    check(count_rule_profile("zzprof(x);\n", "CO830", sast::PROFILE_ALL) == 1, "a custom rule runs in the profile all");
     sast::custom_reset();
 
     if fails > 0 { abort("some checks failed"); }

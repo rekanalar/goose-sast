@@ -174,7 +174,8 @@ fn rule_secretjson(src: const u8[:], file_idx: i64, out: Finding[>..]&) {
             && has_word(tok_of(src, i + 3), "format") {
             var k = i + 4;
             while k < tk_count && tk_line[k] == tk_line[i] {
-                if tk_kind[k] == TK_IDENT && name_holds_secret(tok_of(src, k)) {
+                if tk_kind[k] == TK_IDENT
+                    && secret_class(tok_of(src, k)) != SECRET_NONE {
                     rep(out, idx, file_idx, tk_line[i], tok_col_of(src, tk_start[i]),
                         "a secret-named value goes into a JSON writer");
                     break;
