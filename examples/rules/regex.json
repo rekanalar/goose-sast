@@ -1,0 +1,16 @@
+{
+  "rules": [
+    { "id": "RX01", "severity": "critical", "kind": "regex", "text": "AKIA[0-9A-Z]{16}",
+      "message": "the shape of an AWS access key ID" },
+    { "id": "RX02", "severity": "critical", "kind": "regex", "text": "ghp_[A-Za-z0-9]{36}",
+      "message": "the shape of a GitHub personal access token" },
+    { "id": "RX03", "severity": "medium", "kind": "regex", "text": "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+",
+      "message": "an IPv4 address in the source" },
+    { "id": "RX04", "severity": "low", "kind": "regex", "text": "[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\\.[a-z]+",
+      "message": "an email address in the source" },
+    { "id": "RX05", "severity": "high", "kind": "regex", "text": "xox[bp]-[0-9A-Za-z-]+",
+      "message": "the shape of a Slack token" },
+    { "id": "RX06", "severity": "medium", "kind": "regex", "text": "http://[a-z0-9.-]+",
+      "message": "a plain http URL; use https" }
+  ]
+}

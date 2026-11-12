@@ -1,0 +1,12 @@
+{
+  "rules": [
+    { "id": "HOUSE01", "severity": "high", "kind": "ident", "text": "legacy_login", "exact": true,
+      "message": "the legacy login is forbidden; use the sso module" },
+    { "id": "HOUSE02", "severity": "low", "kind": "ident", "text": "debug_mode", "exact": true,
+      "message": "a debug flag sits in the source" },
+    { "id": "HOUSE03", "severity": "medium", "kind": "ident", "text": "unsafe_", "exact": false,
+      "message": "a name that starts with unsafe_ needs a review" },
+    { "id": "HOUSE04", "severity": "low", "kind": "ident", "text": "sleep_ms", "exact": true,
+      "message": "a sleep in production code hides a race" }
+  ]
+}

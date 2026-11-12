@@ -338,6 +338,19 @@ jobs:
           "$RUNNER_TEMP/sast" -no-fail -rules rx2.json rx2.goose > out.txt
           grep -q "CO821" out.txt
           if grep -q "CO820" out.txt; then echo "a regex rule took the id of another rule"; exit 1; fi
+          # The example policies and advisories give the exit codes that
+          # the examples directory states.
+          code=0; "$RUNNER_TEMP/sast" -no-config -policy examples/policy/strict.json \
+            -advisories examples/advisories/several.json examples/policy/root-bad.goose > /dev/null || code=$?
+          test "$code" = 15
+          code=0; "$RUNNER_TEMP/sast" -no-config -policy examples/policy/permissive.json \
+            examples/policy/root-bad.goose > /dev/null || code=$?
+          test "$code" = 8
+          "$RUNNER_TEMP/sast" -no-config -policy examples/policy/strict.json \
+            -advisories examples/advisories/several.json examples/policy/root-clean.goose > /dev/null
+          for f in secrets house-style comments regex; do
+            "$RUNNER_TEMP/sast" -no-fail -no-config -rules "examples/rules/$f.json" examples/samples/secrets.goose > /dev/null
+          done
         env:
           GOOSE_HOME: ${{ runner.temp }}/goose-home
 

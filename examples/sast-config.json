@@ -1,0 +1,8 @@
+{
+  "min_severity": "low",
+  "exclude": "G101",
+  "exclude_path": "vendor,third_party",
+  "rules": "examples/rules/secrets.json,examples/rules/regex.json",
+  "policy": "examples/policy/strict.json",
+  "advisories": "examples/advisories/several.json"
+}

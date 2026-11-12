@@ -1,0 +1,12 @@
+{
+  "rules": [
+    { "id": "NOTE01", "severity": "low", "kind": "comment", "text": "TODO(security)",
+      "message": "a security task is still open" },
+    { "id": "NOTE02", "severity": "low", "kind": "comment", "text": "FIXME",
+      "message": "a known defect is marked in a comment" },
+    { "id": "NOTE03", "severity": "medium", "kind": "comment", "text": "password",
+      "message": "a comment names a password; check that no value is in it" },
+    { "id": "NOTE04", "severity": "low", "kind": "comment", "text": "HACK",
+      "message": "a hack is marked in a comment" }
+  ]
+}

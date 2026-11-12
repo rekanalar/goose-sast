@@ -1,0 +1,15 @@
+{
+  "bans": { "deny": ["banned"] },
+  "licenses": {
+    "allow": ["MIT"],
+    "require": true,
+    "per_dep": { "url": "MIT", "cbor": "MIT", "xml": "MIT", "markdown": "MIT" }
+  },
+  "sources": { "allow": ["rekanalar"] },
+  "advisories": {
+    "ignore": [
+      { "id": "RSEC-2024-0002", "reason": "the vulnerable call is not reachable in this program" },
+      { "id": "RSEC-2024-0003", "reason": "a fix is planned for the next release" }
+    ]
+  }
+}

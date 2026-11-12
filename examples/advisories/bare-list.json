@@ -1,0 +1,6 @@
+[
+  { "id": "RSEC-2024-0010", "package": "glob", "title": "a pattern escapes the root",
+    "severity": "high", "versions": "<1.2.0", "patched": "1.2.0" },
+  { "id": "RSEC-2024-0011", "package": "image", "title": "a header claims a huge size",
+    "severity": "medium", "versions": ">=1.0.0, <1.1.4", "patched": "1.1.4" }
+]

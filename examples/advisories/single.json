@@ -1,0 +1,6 @@
+{
+  "advisories": [
+    { "id": "RSEC-2024-0001", "package": "url", "title": "an old url parser defect",
+      "severity": "high", "versions": ">=0.1.0, <0.2.0", "patched": "0.2.0" }
+  ]
+}

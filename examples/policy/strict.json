@@ -1,0 +1,17 @@
+{
+  "bans": {
+    "deny": ["banned", "leftpad"],
+    "deny_versions": { "url": ">=0.3.0", "xml": "<1.0.0" }
+  },
+  "licenses": {
+    "allow": ["MIT", "Apache-2.0"],
+    "require": true,
+    "per_dep": { "url": "MIT", "xml": "MIT", "banned": "GPL-3.0", "cbor": "BSD-3-Clause" }
+  },
+  "sources": {
+    "allow": ["rekanalar"]
+  },
+  "advisories": {
+    "ignore": []
+  }
+}

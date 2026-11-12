@@ -1,0 +1,12 @@
+{
+  "advisories": [
+    { "id": "RSEC-2024-0001", "package": "url", "title": "a url parser reads past the host",
+      "severity": "high", "versions": ">=0.1.0, <0.2.0", "patched": "0.2.0" },
+    { "id": "RSEC-2024-0002", "package": "xml", "title": "an entity expansion bomb",
+      "severity": "critical", "versions": "<1.0.0", "patched": "1.0.0" },
+    { "id": "RSEC-2024-0003", "package": "cbor", "title": "a deep nesting exhausts the stack",
+      "severity": "medium", "versions": ">=1.0.0, <1.0.3", "patched": "1.0.3" },
+    { "id": "RSEC-2024-0004", "package": "markdown", "title": "a raw html pass-through",
+      "severity": "high", "versions": "<2.0.0", "patched": "2.0.0" }
+  ]
+}
