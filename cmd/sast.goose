@@ -301,7 +301,7 @@ fn main() {
         if sarif_out { die("the format is text or json"); }
         var out: u8[>..] = [];
         if !sast::explain_rule(explain_id[..], json_out, out) {
-            let cut = explain_id.len;
+            var cut = explain_id.len;
             if cut > 16 { cut = 16; }
             var msg: u8[>..] = [];
             format(msg, "no built-in rule has the ID ", explain_id[..cut]);
