@@ -11,7 +11,6 @@ namespace sast;
 import json;
 
 var doc_loaded: bool = false;
-var doc_base: i64 = -1;
 var doc_explain_s: const u8[:][>..] = [];
 var doc_flagged_s: const u8[:][>..] = [];
 var doc_clean_s: const u8[:][>..] = [];
@@ -50,9 +49,8 @@ fn doc_reason(i: i64) -> const u8[:] { docs_ensure(); return doc_reason_s[i]; }
 
 // docs_ensure fills the four lists once, in the order of the registry.
 fn docs_ensure() {
-    if doc_loaded && reg_id_s.len <= doc_explain_s.len { return; }
+    if doc_loaded { return; }
     reg_ensure();
-    if doc_base < 0 { doc_base = reg_id_s.len; }
     var n: i64 = 0;
     while n < reg_id_s.len {
         doc_explain_s.push("");
@@ -291,10 +289,20 @@ fn docs_ensure() {
             "let v = \"-----BEGIN <type> PRIVATE KEY-----\";",
             "let v = read_key_file(path);",
             "Remove the key from the source and replace the key pair. Load keys from a file with tight permissions.");
+    doc_put("PIN", "An import names a branch, so the code behind it changes when the owner moves the branch. With the commit rule on, a tag gives this finding too. An owner can move a tag. The next fetch can bring other code into the build.",
+            "import url from \"rekanalar/goose-url@main\";",
+            "import url from \"rekanalar/goose-url@3f2c1a9d4e5b\";",
+            "Pin the import to a commit. Run goose fetch once and record the commit that you reviewed.");
+    doc_put("CPART", "A fetched package holds a C part. Its build runs C code on the machine of the user. A package that the cache lacks also gives this finding, because the check cannot tell.",
+            "{\"sources\": {\"report_c_parts\": true}}",
+            "{\"sources\": {\"report_c_parts\": true, \"c_parts_allow\": [\"rekanalar/goose-curl\"]}}",
+            "Read the C code of the package. Add the source to c_parts_allow when you accept it, or use a pure Goose package.");
     doc_exempt("BAN", "the rule reads a policy or an advisory file");
     doc_exempt("LICENSE", "the rule reads a policy or an advisory file");
     doc_exempt("SOURCE", "the rule reads a policy or an advisory file");
     doc_exempt("ADVISORY", "the rule reads a policy or an advisory file");
+    doc_exempt("PIN", "the rule reads a policy or an advisory file");
+    doc_exempt("CPART", "the rule reads a policy or an advisory file");
     doc_exempt("B405", "the release has no detector for the rule");
     doc_exempt("B406", "the release has no detector for the rule");
     doc_exempt("B407", "the release has no detector for the rule");
@@ -305,16 +313,6 @@ fn docs_ensure() {
     doc_exempt("B414", "the release has no detector for the rule");
     doc_exempt("B415", "the release has no detector for the rule");
     doc_exempt("G602", "the release has no detector for the rule");
-    // A custom rule that loaded after the first call extends the
-    // registry. Its rows hold empty text, and explain_known refuses it.
-    while doc_explain_s.len < reg_id_s.len {
-        doc_explain_s.push("");
-        doc_flagged_s.push("");
-        doc_clean_s.push("");
-        doc_fix_s.push("");
-        doc_exempt_s.push(true);
-        doc_reason_s.push("the rule is a custom rule of this run");
-    }
     doc_loaded = true;
 }
 
@@ -364,10 +362,10 @@ fn doc_fixture(i: i64, out: u8[>..]&) {
 // ID, or -1. An alias does not count, and an ID of more than 16 bytes
 // is unknown.
 fn explain_known(id: const u8[:]) -> i64 {
-    docs_ensure();
+    reg_ensure();
     if id.len == 0 || id.len > 16 { return -1; }
     let i = reg_find(id);
-    if i < 0 || i >= doc_base { return -1; }
+    if i < 0 { return -1; }
     if reg_id_s[i] == id { return i; }
     return -1;
 }

@@ -39,7 +39,7 @@ fn usage() {
     write_stderr("  -no-config                          do not read .goose-sast.json\n");
     write_stderr("  -profile default|strict|all         the rule set and the walk (default default)\n");
     write_stderr("  -report-unused                      name the suppressions that silenced nothing\n");
-    write_stderr("  -policy FILE                        run the dependency checks with this policy\n");
+    write_stderr("  -policy FILE                        run the dependency checks, the pin and the C part checks\n");
     write_stderr("  -advisories FILE                    run the advisory check with this file\n");
     write_stderr("  -quiet                               no output but the exit code\n");
     write_stderr("  -no-fail                             always exit 0\n");
@@ -464,6 +464,7 @@ fn main() {
             // The store keeps the findings of the scan. The check adds
             // to it, so the path table stays valid.
             sast::check_deps(root_src[..], df);
+            if policy_path.len > 0 { sast::check_supply(df); }
             for f in df { findings.push(f); }
         }
         // The bitset of cargo-deny: advisories 1, bans 2, licenses 4,
@@ -474,7 +475,7 @@ fn main() {
             if rid == "ADVISORY" { dep_bits = dep_bits | 1; }
             else if rid == "BAN" { dep_bits = dep_bits | 2; }
             else if rid == "LICENSE" { dep_bits = dep_bits | 4; }
-            else if rid == "SOURCE" { dep_bits = dep_bits | 8; }
+            else if rid == "SOURCE" || rid == "PIN" || rid == "CPART" { dep_bits = dep_bits | 8; }
             i2 = i2 + 1;
         }
     }

@@ -401,14 +401,14 @@ fn metadata_tests() {
         check(shape_free(alltxt[..]), "metadata holds a whole secret shape");
         i = i + 1;
     }
-    check(n == 57, "the registry holds 57 rules");
+    check(n == 59, "the registry holds 59 rules");
 
     // The IDs of this release are pinned.
     var ids: u8[>..] = [];
     i = 0;
     while i < n { ids.push(124); put(ids, sast::reg_id_s[i]); i = i + 1; }
     ids.push(124);
-    check(ids[..] == "|G101|G102|G109|G116|G201|G202|G203|G204|G301|G302|G303|G304|G306|G401|G404|G111|B101|B110|B113|B607|B609|G501|G502|G503|G504|G505|G506|G507|B401|B402|B403|B404|B405|B406|B407|B408|B409|B410|B411|B412|B413|B414|G103|G104|G602|G702|G703|BAN|LICENSE|SOURCE|ADVISORY|G117|B415|S101|S102|S103|S104|", "the rule IDs of the release changed");
+    check(ids[..] == "|G101|G102|G109|G116|G201|G202|G203|G204|G301|G302|G303|G304|G306|G401|G404|G111|B101|B110|B113|B607|B609|G501|G502|G503|G504|G505|G506|G507|B401|B402|B403|B404|B405|B406|B407|B408|B409|B410|B411|B412|B413|B414|G103|G104|G602|G702|G703|BAN|LICENSE|SOURCE|ADVISORY|G117|B415|S101|S102|S103|S104|PIN|CPART|", "the rule IDs of the release changed");
 
     // The flagged example fires its rule and the clean example does not.
     var exempt_count: i64 = 0;
@@ -429,7 +429,7 @@ fn metadata_tests() {
         }
         i = i + 1;
     }
-    check(exempt_count == 14, "the list of rules with no scanned example changed");
+    check(exempt_count == 16, "the list of rules with no scanned example changed");
     check(sast::doc_reason(sast::reg_find("BAN")).len > 0, "an exempt rule names its reason");
     check(sast::doc_reason(sast::reg_find("G602")).len > 0, "an exempt rule names its reason");
 
@@ -614,6 +614,141 @@ fn metadata_tests() {
         while to < rd.len && rd[to] != 34 { to = to + 1; }
         check(rd[from..to] == sast::VERSION, "the README version equals the package version");
     }
+}
+
+// mk_dirs makes each directory level of the path.
+fn mk_dirs(path: const u8[:]) {
+    var i: i64 = 1;
+    while i <= path.len {
+        if i == path.len || path[i] == 47 { make_dir(path[0..i]); }
+        i = i + 1;
+    }
+}
+
+// mk_file writes a file in a cache entry, after its directories.
+fn mk_file(dir: const u8[:], name: const u8[:], text: const u8[:]) {
+    mk_dirs(dir);
+    var p: u8[>..] = [];
+    put(p, dir); put(p, "/"); put(p, name);
+    write_file(p[..], text);
+}
+
+// supply_pol loads a policy text and checks that it parses.
+fn supply_pol(text: const u8[:], what: const u8[:]) {
+    var e: u8[>..] = [];
+    check(sast::read_policy(text, e), what);
+}
+
+// supply_count runs the pin and the C part checks on a program and
+// gives the count of findings of the rule.
+fn supply_count(prog: const u8[:], root: const u8[:], id: const u8[:]) -> i64 {
+    sast::read_manifest(prog);
+    var df: sast::Finding[>..] = [];
+    sast::check_pins(root, df);
+    sast::check_cparts(root, df);
+    var n: i64 = 0;
+    for f in df { if sast::reg_id_s[f.rule] == id { n = n + 1; } }
+    return n;
+}
+
+fn supply_tests() {
+    // The pin kind with no cache.
+    check(sast::pin_kind("", "", "../lib") == 0, "a local path has no pin");
+    check(sast::pin_kind("abc1234", "", "o/r") == 1, "7 hex bytes are a commit");
+    check(sast::pin_kind("0123456789abcdef0123456789abcdef01234567", "", "o/r") == 1, "40 hex bytes are a commit");
+    check(sast::pin_kind("abc123", "", "o/r") == 3, "6 hex bytes are no commit");
+    check(sast::pin_kind("ABC1234", "", "o/r") == 3, "uppercase hex is no commit");
+    check(sast::pin_kind("v1.2.3", "", "o/r") == 2, "v and a digit is a tag with no cache");
+    check(sast::pin_kind("main", "", "o/r") == 3, "a name is a branch with no cache");
+    // The source check.
+    check(sast::source_safe("o/r"), "o/r is safe");
+    check(sast::source_safe("github.com/o/r"), "a host source is safe");
+    check(!sast::source_safe("../x"), "a .. segment is unsafe");
+    check(!sast::source_safe("o/../r"), "a middle .. segment is unsafe");
+    check(!sast::source_safe("/o/r"), "a leading slash is unsafe");
+    check(!sast::source_safe("o\\r"), "a backslash is unsafe");
+    check(!sast::source_safe("o//r"), "an empty segment is unsafe");
+    check(!sast::source_safe(""), "an empty source is unsafe");
+    var big: u8[>..] = [];
+    fill(big, 97, 257);
+    check(!sast::source_safe(big[..]), "257 bytes are unsafe");
+    var nul: u8[>..] = [];
+    put(nul, "o/r"); nul.push(0);
+    check(!sast::source_safe(nul[..]), "a NUL byte is unsafe");
+    // The URL cache name, measured with the compiler.
+    var un: u8[>..] = [];
+    check(sast::url_cache_name("file:///home/ubuntu/works/goose/pkgtest/mylib", un), "url name builds");
+    check(un[..] == "mylib-e6dff747", "the url cache name matches the compiler");
+
+    // A fake cache.
+    let root = "../../tmp/sc-cache";
+    let gh = "../../tmp/sc-cache/github.com/o";
+    mk_file("../../tmp/sc-cache/github.com/o/tagpkg/v1/.git", "config", "[remote]\n\tfetch = +refs/tags/v1:refs/tags/v1\n");
+    mk_file("../../tmp/sc-cache/github.com/o/brpkg/v1/.git", "config", "[remote]\n\tfetch = +refs/heads/v1:refs/remotes/origin/v1\n");
+    mk_file("../../tmp/sc-cache/github.com/o/cpkg/v1", "x.build", "c_sources = [\"a.c\"];\n");
+    mk_file("../../tmp/sc-cache/github.com/o/cpkg/0123456789ab", "x.build", "c_sources = [\"a.c\"];\n");
+    mk_file("../../tmp/sc-cache/github.com/o/cmk/v1", "CMakeLists.txt", "project(x)\n");
+    mk_file("../../tmp/sc-cache/github.com/o/pure/v1", "pure.goose", "namespace pure;\n");
+    check(sast::pin_kind("v1", root, "o/tagpkg") == 2, "the cache tag refspec gives a tag");
+    check(sast::pin_kind("v1", root, "o/brpkg") == 3, "the cache branch refspec gives a branch");
+    check(sast::cpart_probe(root, "o/cpkg", "v1") == 1, "a sidecar with c_sources is a C part");
+    check(sast::cpart_probe(root, "o/cmk", "v1") == 1, "a CMakeLists.txt is a C part");
+    check(sast::cpart_probe(root, "o/pure", "v1") == 0, "a pure package has no C part");
+    // A sidecar above the bound is unreadable, so the probe fails closed.
+    var bigtxt: u8[>..] = [];
+    fill(bigtxt, 32, 70000);
+    put(bigtxt, "c_sources = [];");
+    mk_file("../../tmp/sc-cache/github.com/o/big/v1", "x.build", bigtxt[..]);
+    check(sast::cpart_probe(root, "o/big", "v1") == 2, "a sidecar above the bound cannot be checked");
+    check(sast::cpart_probe(root, "o/none", "v1") == 2, "a missing entry cannot be checked");
+    check(sast::cpart_probe(root, "../x", "v1") == 2, "an unsafe source cannot be checked");
+    check(sast::cpart_probe(root, "o/pure", "../v1") == 2, "an unsafe ref cannot be checked");
+
+    // The policy keys.
+    supply_pol("{}", "an empty policy parses");
+    check(!sast::pol_pin_required, "require_commit_pin defaults to false");
+    check(!sast::pol_cpart_report, "report_c_parts defaults to false");
+    sast::pol_reset();
+    supply_pol("{\"sources\":{\"require_commit_pin\":true,\"report_c_parts\":true,\"c_parts_allow\":[\"o/cpkg\"]}}", "the supply keys parse");
+    check(sast::pol_pin_required, "require_commit_pin reads as true");
+    check(sast::pol_cpart_report, "report_c_parts reads as true");
+    check(sast::pol_cpart_allowed("o/cpkg"), "the allow list holds its name");
+    check(!sast::pol_cpart_allowed("o/cmk"), "the allow list holds no other name");
+    var perr: u8[>..] = [];
+    check(!sast::read_policy("{\"sources\":{\"require_commit_pin\":\"yes\"}}", perr), "a string for a bool key is a fault");
+    check(perr.len > 0, "the fault has a text");
+    var lots: u8[>..] = [];
+    put(lots, "{\"sources\":{\"c_parts_allow\":[");
+    var li: i64 = 0;
+    while li < 1025 { if li > 0 { put(lots, ","); } put(lots, "\"n\""); li = li + 1; }
+    put(lots, "]}}");
+    var lerr: u8[>..] = [];
+    check(!sast::read_policy(lots[..], lerr), "1025 allow names are a fault");
+    var long: u8[>..] = [];
+    put(long, "{\"sources\":{\"c_parts_allow\":[\"");
+    fill(long, 97, 257);
+    put(long, "\"]}}");
+    var lerr2: u8[>..] = [];
+    check(!sast::read_policy(long[..], lerr2), "a 257-byte allow name is a fault");
+
+    // The checks over a program of four imports.
+    let prog = "import a from \"o/brpkg@v1\";\nimport b from \"o/tagpkg@v1\";\nimport c from \"o/cpkg@0123456789ab\";\nimport d from \"../lib\";\nimport e from \"o/none@v1\";\n";
+    supply_pol("{}", "empty policy for the checks");
+    check(supply_count(prog, root, "PIN") == 1, "an empty policy reports the branch only");
+    check(supply_count(prog, root, "CPART") == 0, "an empty policy reports no C part");
+    supply_pol("{\"sources\":{\"require_commit_pin\":true}}", "the commit policy");
+    check(supply_count(prog, root, "PIN") == 3, "the commit policy reports the branch and two tags");
+    supply_pol("{\"sources\":{\"report_c_parts\":true}}", "the C part policy");
+    check(supply_count(prog, root, "CPART") == 2, "the C part policy reports the C package and the missing one");
+    supply_pol("{\"sources\":{\"report_c_parts\":true,\"c_parts_allow\":[\"o/cpkg\",\"o/none\"]}}", "the allow policy");
+    check(supply_count(prog, root, "CPART") == 0, "the allow list silences the C part check");
+    // The URL userinfo: the pin is the text after the last @.
+    sast::read_manifest("import u from \"https://me@host.example/x/y.git@v2\";\n");
+    check(sast::dep_tag(0) == "v2", "the pin of a URL with userinfo is after the last @");
+    sast::pol_reset();
+    // The dependency check alone adds no pin finding.
+    var nd: sast::Finding[>..] = [];
+    check(sast::check_deps(prog, nd) == 0, "check_deps gives no pin finding");
 }
 
 fn main() {
@@ -1583,6 +1718,7 @@ fn main() {
 
     metadata_tests();
     baseline_tests();
+    supply_tests();
 
     if fails > 0 { abort("some checks failed"); }
     print("all sast checks pass");

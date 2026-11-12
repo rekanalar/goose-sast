@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.12.0";
+import sast from "rekanalar/goose-sast@v0.13.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.12.0";
+import sast from "rekanalar/goose-sast@v0.13.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -314,9 +314,27 @@ The dependency checks report under their own IDs.
 | LICENSE | a licence that is not on the allow list, or a missing licence |
 | SOURCE | a source that is not on the allow list |
 | ADVISORY | a pinned version that an advisory range covers |
+| PIN | an import that names a branch; with `sources.require_commit_pin`, also an import that names a tag |
+| CPART | a fetched package with a C part, with `sources.report_c_parts`; also a package the check cannot read |
+
+The pin and C part checks run only when `-policy` loads a file. A run without a policy file gives no `PIN` or `CPART` finding. They count in exit bit 8, with `SOURCE`. The policy keys sit in the `sources` section:
+
+| Key | Type | Effect |
+|---|---|---|
+| `require_commit_pin` | bool | an import must name a commit (7 to 40 lowercase hex bytes) |
+| `report_c_parts` | bool | report each fetched package that holds a C part |
+| `c_parts_allow` | list | import sources without the pin, such as `rekanalar/goose-curl`; at most 1024 names of 256 bytes |
+
+The checks read the cache of fetched packages in `$GOOSE_HOME/pkg`, or in `~/.goose/pkg`. A directory named by the ref holds each tag, branch and commit. The git config of the entry tells a tag from a branch. A C part is a `.build` file with `c_sources` or `cmake_target`, or a `CMakeLists.txt`. cargo-deny `sources` has the same pin rule. No reference tool reports a C build step.
+
+An import with no `@` is a local path, and the checks skip it.
 
 ## Limits
 
+- The tag against branch test reads the cache. For a package that the cache lacks, the form decides. A ref of `v` and a digit is a tag. Any other name is a branch.
+- A ref of 7 to 40 lowercase hex bytes is a commit. A tag that is all hex, such as `deadbeef`, reads as a commit.
+- The C part check cannot see a package that the cache lacks, or a layout that a newer compiler writes. It reports that case as a finding and never as silence. It reads the entry of each listed package only. The root file lists every package, so no package stays hidden.
+- A tag name that holds a slash cannot make a cache path. The check reports such a package as unreadable.
 - The rules read the source as text. A name that a program builds at run time stays invisible.
 - The tokenizer holds strings, comments, identifiers and numbers. It does not parse the language, so a rule that needs types does not exist.
 - G401 and G404 report a bare call and a qualified call, such as `md5::sum(x)` and `rand::int(n)`. The language stores no function value, so no name can hold the weak function. gosec and bandit resolve the import alias in the same way. Only semgrep follows a function value, and Goose has none to follow.
@@ -385,6 +403,9 @@ src/deploy.goose:12:10: critical: S101: an AWS access key ID is in the source
 
 ## Security
 
+- The pin and C part checks build a cache path from the text of the source that the run scans. A segment holds only letters, digits, dot, dash and underscore. Five inputs give no path. They are a `..` segment, an empty segment and a leading slash. A backslash or NUL byte and a source above 256 bytes give none either. The package is then reported as unreadable.
+- The probe never calls a package free of C when its sidecar is a link or too large or unreadable. It reports the package as unreadable. The cache probe never follows a symbolic link. It lists at most 4096 names and reads at most 64 KiB from one file. It reads no network and writes nothing.
+- The reference `cargo-deny` accepts a branch pin unless a rule asks for more. This package reports a branch under any policy file, because a branch moves by design.
 - The baseline file is hostile input. Its size is bounded like the size of a source file. Its lines are checked whole. A fault names the line number only. The fault text holds no byte of the file.
 - The `-explain` flag prints constants of the package. It reads no file. A fault names at most 16 bytes of the ID, and a byte outside printable ASCII appears as `\xNN`.
 - A newline in an unknown ID stays a newline. The escaper of the faults passes it, so a line of the fault can break. A wrapper that parses the error output line by line must expect this.

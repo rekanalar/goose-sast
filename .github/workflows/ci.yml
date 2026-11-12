@@ -271,6 +271,40 @@ jobs:
           code=$?
           set -e
           test "$code" = 7
+          # The pin check: a branch import under an empty policy gives
+          # exit bit 8, and a run without a policy gives none.
+          mkdir -p "$RUNNER_TEMP/pin"
+          printf 'import x from "owner/repo@main";\n' > "$RUNNER_TEMP/pin/root.goose"
+          printf '{}\n' > "$RUNNER_TEMP/pin/policy.json"
+          set +e
+          "$RUNNER_TEMP/sast" -no-config -policy "$RUNNER_TEMP/pin/policy.json" "$RUNNER_TEMP/pin/root.goose" > out.txt
+          code=$?
+          set -e
+          test "$code" = 8
+          grep -q "PIN" out.txt
+          "$RUNNER_TEMP/sast" -no-config "$RUNNER_TEMP/pin/root.goose" | grep -q "0 finding"
+          # The C part check reads a fake cache. A link in the cache
+          # is never followed, so its package is reported as unreadable.
+          mkdir -p "$RUNNER_TEMP/gh/pkg/github.com/o/cp/v1" "$RUNNER_TEMP/gh/pkg/github.com/o/ok/v1"
+          printf 'c_sources = ["a.c"];\n' > "$RUNNER_TEMP/gh/pkg/github.com/o/cp/v1/x.build"
+          printf 'namespace ok;\n' > "$RUNNER_TEMP/gh/pkg/github.com/o/ok/v1/ok.goose"
+          printf 'import a from "o/cp@v1";\nimport b from "o/ok@v1";\n' > "$RUNNER_TEMP/pin/cp.goose"
+          printf '{"sources":{"report_c_parts":true}}\n' > "$RUNNER_TEMP/pin/cp.json"
+          set +e
+          GOOSE_HOME="$RUNNER_TEMP/gh" "$RUNNER_TEMP/sast" -no-config -policy "$RUNNER_TEMP/pin/cp.json" "$RUNNER_TEMP/pin/cp.goose" > out.txt
+          code=$?
+          set -e
+          test "$code" = 8
+          grep -q "CPART: a@v1" out.txt
+          ! grep -q "CPART: b@v1" out.txt
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            ln -s "$RUNNER_TEMP/gh/pkg/github.com/o/cp/v1" "$RUNNER_TEMP/gh/pkg/github.com/o/ok/v2"
+            printf 'import c from "o/ok@v2";\n' > "$RUNNER_TEMP/pin/ln.goose"
+            set +e
+            GOOSE_HOME="$RUNNER_TEMP/gh" "$RUNNER_TEMP/sast" -no-config -policy "$RUNNER_TEMP/pin/cp.json" "$RUNNER_TEMP/pin/ln.goose" > out.txt
+            set -e
+            grep -q "cannot be checked" out.txt
+          fi
           # A policy that does not parse is a fault.
           printf '{ "bans": ' > "$RUNNER_TEMP/bad.json"
           set +e

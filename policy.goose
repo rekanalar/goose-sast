@@ -35,6 +35,12 @@ var pol_ign_reason_end: i64[>..] = [];
 // Whether the policy demands a licence for every package.
 var pol_lic_required = false;
 
+// The supply-chain keys of the sources section.
+var pol_pin_required = false;
+var pol_cpart_report = false;
+var pol_cpa_at: i64[>..] = [];
+var pol_cpa_end: i64[>..] = [];
+
 // pol_reset empties the policy.
 fn pol_reset() {
     pol_buf.resize(0, 0);
@@ -57,6 +63,10 @@ fn pol_reset() {
     pol_ign_reason_at.resize(0, 0);
     pol_ign_reason_end.resize(0, 0);
     pol_lic_required = false;
+    pol_pin_required = false;
+    pol_cpart_report = false;
+    pol_cpa_at.resize(0, 0);
+    pol_cpa_end.resize(0, 0);
 }
 
 // pol_push copies one text into the policy buffer and gives its range.
@@ -164,6 +174,16 @@ fn read_policy(text: const u8[:], err: u8[>..]&) -> bool {
     return true;
 }
 
+// pol_cpart_allowed reports whether the source is on the C part list.
+fn pol_cpart_allowed(src: const u8[:]) -> bool {
+    var i: i64 = 0;
+    while i < pol_cpa_at.len {
+        if pol_buf[pol_cpa_at[i]..pol_cpa_end[i]] == src { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
 // read_bans reads the bans section.
 fn read_bans(r: json::Reader&, scratch: u8[>..]&) {
     json::each_member(r) { key =>
@@ -227,6 +247,23 @@ fn read_sources(r: json::Reader&, scratch: u8[>..]&) {
                 let a, b = pol_push(s);
                 pol_src_at.push(a);
                 pol_src_end.push(b);
+            };
+        } else if key == "require_commit_pin" {
+            pol_pin_required = json::read_bool(r);
+        } else if key == "report_c_parts" {
+            pol_cpart_report = json::read_bool(r);
+        } else if key == "c_parts_allow" {
+            json::each_element(r) {
+                let s = json::read_string(r, scratch);
+                if pol_cpa_at.len >= 1024 {
+                    json::fail(r, "c_parts_allow holds too many names (the bound is 1024)");
+                } else if s.len > 256 {
+                    json::fail(r, "a name in c_parts_allow is too long (the bound is 256 bytes)");
+                } else {
+                    let a, b = pol_push(s);
+                    pol_cpa_at.push(a);
+                    pol_cpa_end.push(b);
+                }
             };
         } else {
             json::skip(r);

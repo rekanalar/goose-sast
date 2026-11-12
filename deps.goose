@@ -9,6 +9,8 @@ const RULE_BAN: const u8[:] = "BAN";
 const RULE_LICENCE: const u8[:] = "LICENSE";
 const RULE_SOURCE: const u8[:] = "SOURCE";
 const RULE_ADVISORY: const u8[:] = "ADVISORY";
+const RULE_PIN: const u8[:] = "PIN";
+const RULE_CPART: const u8[:] = "CPART";
 
 // dep_findings holds the findings of the dependency checks of the last
 // run, so the caller can read them after the checks.

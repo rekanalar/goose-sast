@@ -58,16 +58,17 @@ fn dep_count() -> i64 {
     return dep_name_at.len;
 }
 
-// split_at_at splits the text at the @ sign. It gives the part before
-// and the part after. A text with no @ sign gives the whole text and an
-// empty part.
+// split_at_at splits the text at the last @ sign. It gives the part
+// before and the part after. A text with no @ sign gives the whole text
+// and an empty part. The last sign counts, because a URL source can hold
+// an @ in its user part.
 fn split_at_at(text: const u8[:]) -> const u8[:], const u8[:] {
-    var i: i64 = 0;
-    while i < text.len {
+    var i: i64 = text.len - 1;
+    while i >= 0 {
         if text[i] == 64 {
             return text[0..i], text[i + 1..text.len];
         }
-        i = i + 1;
+        i = i - 1;
     }
     return text, "";
 }

@@ -17,6 +17,7 @@ import manifest;
 import policy;
 import advise;
 import deps;
+import supply;
 import links;
 import custom;
 import secret_shapes;
@@ -29,7 +30,7 @@ import rule_docs;
 
 // The version of the package. The SARIF driver reports it, and the README
 // import line names it.
-const VERSION: const u8[:] = "0.12.0";
+const VERSION: const u8[:] = "0.13.0";
 
 // The severity order. A finding with a lower severity than the option
 // does not print and does not set the exit code.
@@ -269,6 +270,8 @@ fn reg_ensure() {
     reg_put("S102", SEV_CRITICAL, CONF_HIGH, 798, "", "a GitHub token is in the source");
     reg_put("S103", SEV_HIGH, CONF_HIGH, 798, "", "a Slack token is in the source");
     reg_put("S104", SEV_CRITICAL, CONF_HIGH, 321, "", "a private key header is in the source");
+    reg_put("PIN", SEV_MEDIUM, CONF_HIGH, 0, "", "a dependency is pinned to a name that can move");
+    reg_put("CPART", SEV_MEDIUM, CONF_HIGH, 0, "", "a dependency builds C code on this machine");
     // Three rules stay out of the default profile. Their findings
     // are common and rarely a defect in a real project.
     tier_set("G304", TIER_STRICT);
