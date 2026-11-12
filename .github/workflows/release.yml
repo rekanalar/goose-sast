@@ -1,0 +1,181 @@
+name: release
+
+# A tag that starts with v builds, checks and publishes. A manual run
+# builds and checks only: the release job needs a tag.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: sast-linux-x64
+          - os: macos-latest
+            name: sast-macos-arm64
+          - os: windows-latest
+            name: sast-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install the Goose release
+        run: |
+          set -euo pipefail
+          tag="v2026.4"
+          dest="$RUNNER_TEMP/goose"
+          mkdir -p "$dest"
+          case "$RUNNER_OS" in
+            Linux) asset="linux-x64.tar.gz" ;;
+            macOS) asset="macos-arm64.tar.gz" ;;
+            Windows) asset="windows-x64.zip" ;;
+          esac
+          url="https://github.com/aardappel/goose/releases/download/${tag}/goose-${tag}-${asset}"
+          # The digest of the toolchain. A changed asset ends the run.
+          case "$RUNNER_OS" in
+            Linux) want="559ad7572df89fcd1273512d8679528bcdf876c252ec1f31608d3808b24125b3" ;;
+            macOS) want="8ef0b5a864a719bd095b8376bed069d0edc77a0ce8f3cb9d59fdf87291a3a922" ;;
+            Windows) want="87ceb0ff2394e0ac4154b6c6b865c084cadbf236558cc956b114f37d6e619cdb" ;;
+          esac
+          if [ "$RUNNER_OS" = Windows ]; then
+            curl -fsSL --retry 20 --retry-delay 15 --retry-max-time 600 --retry-all-errors "$url" -o "$dest/goose.zip"
+            7z x -y -o"$dest" "$dest/goose.zip" > /dev/null
+            exe=$(find "$dest" -type f -name goose.exe | head -1)
+          else
+            curl -fsSL --retry 20 --retry-delay 15 --retry-max-time 600 --retry-all-errors "$url" -o "$dest/goose.tar.gz"
+            tar -xzf "$dest/goose.tar.gz" -C "$dest"
+            exe=$(find "$dest" -type f -name goose | head -1)
+          fi
+          if [ "$RUNNER_OS" = Windows ]; then
+            got=$(sha256sum "$dest/goose.zip" | cut -d" " -f1)
+          else
+            got=$(sha256sum "$dest/goose.tar.gz" | cut -d" " -f1)
+          fi
+          test "$got" = "$want"
+          chmod +x "$exe"
+          bindir="$(dirname "$exe")"
+          if [ "$RUNNER_OS" = Windows ]; then bindir="$(cygpath -w "$bindir")"; fi
+          echo "$bindir" >> "$GITHUB_PATH"
+
+      - name: Build the command
+        timeout-minutes: 20
+        env:
+          GOOSE_HOME: ${{ runner.temp }}/goose-home
+          NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          goose build -o "dist/$NAME" cmd/sast.goose
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/${{ matrix.name }}
+          if-no-files-found: error
+
+  # The verify jobs never install Goose. They run the built file as a
+  # user with only the download would run it.
+  verify:
+    needs: build
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: sast-linux-x64
+          - os: macos-latest
+            name: sast-macos-arm64
+          - os: windows-latest
+            name: sast-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4
+        with:
+          name: ${{ matrix.name }}
+      - name: Run the binary
+        env:
+          NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          chmod +x "./$NAME"
+          "./$NAME" -version | grep -q '^sast [0-9]'
+          printf 'let password = "hunter2hunter2";\n' > probe.goose
+          code=0; "./$NAME" -no-config probe.goose > out.txt || code=$?
+          test "$code" = 1
+          grep -q "G101" out.txt
+
+  # The sign job alone holds the identity token. It holds no write
+  # right on the contents.
+  sign:
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Check the tag, sum and sign
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd dist
+          chmod +x sast-linux-x64
+          ver=$(./sast-linux-x64 -version | sed 's/^sast //')
+          test "$TAG" = "v$ver"
+          sha256sum sast-* > checksums.txt
+          cosign sign-blob --yes --bundle checksums.txt.bundle checksums.txt
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v4
+        with:
+          name: signed
+          path: |
+            dist/checksums.txt
+            dist/checksums.txt.bundle
+          if-no-files-found: error
+
+  # The release job alone writes the contents. It runs no third-party
+  # action and holds no identity token.
+  release:
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c checksums.txt
+          gh release create "$TAG" --repo "$REPO" --title "$TAG" \
+            --notes "Binaries of sast $TAG. Verify them with checksums.txt and checksums.txt.bundle." \
+            sast-* checksums.txt checksums.txt.bundle

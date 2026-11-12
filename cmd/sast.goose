@@ -44,6 +44,7 @@ fn usage() {
     write_stderr("  -quiet                               no output but the exit code\n");
     write_stderr("  -no-fail                             always exit 0\n");
     write_stderr("  -list-rules                          print the rule list and exit\n");
+    write_stderr("  -version                             print the version and exit\n");
     write_stderr("  -explain ID                          print the explanation of one rule and exit\n");
     write_stderr("  -baseline FILE                       report only the findings the file does not hold\n");
     write_stderr("  -update-baseline FILE                write the fingerprints of the findings to the file\n");
@@ -147,6 +148,7 @@ fn main() {
     var have_update = false;
     var explain_id: u8[>..] = [];
     var have_explain = false;
+    var have_version = false;
     var json_out = false;
     var sarif_out = false;
     var policy_path: u8[>..] = [];
@@ -298,6 +300,8 @@ fn main() {
             if i >= arg_count() { die("the flag needs a value"); }
             arg(i, explain_id);
             have_explain = true;
+        } else if a[..] == "-version" {
+            have_version = true;
         } else if a[..] == "-list-rules" {
             list_rules = true;
         } else if a[..] == "-h" || a[..] == "-help" || a[..] == "--help" {
@@ -314,6 +318,13 @@ fn main() {
     }
 
     if bad.len > 0 { die(bad[..]); }
+
+    if have_version {
+        var vt: u8[>..] = [];
+        format(vt, "sast ", sast::VERSION, "\n");
+        write_stdout(vt[..]);
+        exit(0);
+    }
 
     if have_explain {
         if sarif_out { die("the format is text or json"); }

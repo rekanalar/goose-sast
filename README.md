@@ -6,10 +6,47 @@ A security linter for Goose: source rules, dependency policy checks and advisory
 
 The package is a library and a command. The library scans a text or a tree and gives the findings as values. The `sast` command prints them and sets the exit code. Each finding holds a rule ID, a severity, a confidence and a CWE number. It also holds the file, the line, the column and a message.
 
+## Quick start
+
+A release holds one binary for each of Linux x64, macOS arm64 and Windows x64. The binary needs no Goose install and no C compiler.
+
+```sh
+v=v0.14.0
+base=https://github.com/rekanalar/goose-sast/releases/download/$v
+curl -fsSLO $base/sast-linux-x64 -O $base/checksums.txt -O $base/checksums.txt.bundle
+sha256sum -c checksums.txt --ignore-missing
+cosign verify-blob --bundle checksums.txt.bundle checksums.txt \
+  --certificate-identity-regexp '^https://github.com/rekanalar/goose-sast/\.github/workflows/release\.yml@' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+chmod +x sast-linux-x64 && ./sast-linux-x64 -version && ./sast-linux-x64 src/
+```
+
+The checksum check needs no other tool. The cosign check shows that the release workflow of this repository built the file.
+
+Upload the findings to code scanning with a step of six lines:
+
+```yaml
+- run: |
+    curl -fsSLO https://github.com/rekanalar/goose-sast/releases/download/v0.14.0/sast-linux-x64
+    chmod +x sast-linux-x64 && ./sast-linux-x64 -f sarif -no-fail . > sast.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with: { sarif_file: sast.sarif }
+```
+
+Run the tool before each commit with a `pre-commit` entry. The hook runs the `sast` command that is on the path. The `rev` pins the hook file only, so the user places a verified `sast` on the path:
+
+```yaml
+repos:
+  - repo: https://github.com/rekanalar/goose-sast
+    rev: v0.14.0
+    hooks:
+      - id: goose-sast
+```
+
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.13.0";
+import sast from "rekanalar/goose-sast@v0.14.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +65,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.13.0";
+import sast from "rekanalar/goose-sast@v0.14.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -331,6 +368,9 @@ An import with no `@` is a local path, and the checks skip it.
 
 ## Limits
 
+- A release holds three binaries: Linux x64, macOS arm64 and Windows x64. Other targets build from source. The Linux binary links the C library and the math library of the system, so it needs a glibc system.
+- The six-line workflow downloads the binary without the checksum check, to stay short. A team that wants the check adds the commands of the quick start.
+- The pre-commit hook runs the `sast` of the path. A binary of the same name in the scanned repository can shadow it on Windows. A team that wants no shadowing names the file path in its own hook.
 - The tag against branch test reads the cache. For a package that the cache lacks, the form decides. A ref of `v` and a digit is a tag. Any other name is a branch.
 - A ref of 7 to 40 lowercase hex bytes is a commit. A tag that is all hex, such as `deadbeef`, reads as a commit.
 - The C part check cannot see a package that the cache lacks, or a layout that a newer compiler writes. It reports that case as a finding and never as silence. It reads the entry of each listed package only. The root file lists every package, so no package stays hidden.
@@ -403,6 +443,7 @@ src/deploy.goose:12:10: critical: S101: an AWS access key ID is in the source
 
 ## Security
 
+- The release workflow signs `checksums.txt` with keyless signing. The signature names the workflow of this repository, and no key is stored. The build jobs hold read rights only. The sign job alone holds the identity token, and the release job alone writes. Each action sits at a commit hash, and the build checks the digest of the Goose toolchain it downloads. The tag name reaches the shell through an environment variable.
 - The pin and C part checks build a cache path from the text of the source that the run scans. A segment holds only letters, digits, dot, dash and underscore. Five inputs give no path. They are a `..` segment, an empty segment and a leading slash. A backslash or NUL byte and a source above 256 bytes give none either. The package is then reported as unreadable.
 - The probe never calls a package free of C when its sidecar is a link or too large or unreadable. It reports the package as unreadable. The cache probe never follows a symbolic link. It lists at most 4096 names and reads at most 64 KiB from one file. It reads no network and writes nothing.
 - The reference `cargo-deny` accepts a branch pin unless a rule asks for more. This package reports a branch under any policy file, because a branch moves by design.

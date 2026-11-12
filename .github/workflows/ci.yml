@@ -271,6 +271,8 @@ jobs:
           code=$?
           set -e
           test "$code" = 7
+          # The version flag prints the version of the entry file.
+          "$RUNNER_TEMP/sast" -version | grep -qx 'sast [0-9]*\.[0-9]*\.[0-9]*' 
           # The pin check: a branch import under an empty policy gives
           # exit bit 8, and a run without a policy gives none.
           mkdir -p "$RUNNER_TEMP/pin"

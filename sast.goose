@@ -30,7 +30,7 @@ import rule_docs;
 
 // The version of the package. The SARIF driver reports it, and the README
 // import line names it.
-const VERSION: const u8[:] = "0.13.0";
+const VERSION: const u8[:] = "0.14.0";
 
 // The severity order. A finding with a lower severity than the option
 // does not print and does not set the exit code.

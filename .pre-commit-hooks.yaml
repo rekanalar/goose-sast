@@ -1,0 +1,6 @@
+- id: goose-sast
+  name: goose-sast
+  description: Scan Goose source for security defects
+  language: system
+  entry: sast
+  files: '\.goose$'
