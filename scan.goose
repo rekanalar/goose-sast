@@ -351,7 +351,8 @@ fn vis_put(path: const u8[:]) {
 // scan_walk walks the queue breadth first. It reads each .goose file
 // once, follows no link and stops at the depth bound. It counts the
 // files it scanned in scanned and the entries it skipped in skipped.
-fn scan_walk(o: Options, out: Finding[>..]&, scanned: i64&, skipped: i64&) {
+fn scan_walk(o: Options, out: Finding[>..]&, scanned: i64&, skipped: i64&,
+             budget: i64&) {
     var head: i64 = 0;
     while head < q_at.len {
         let depth = q_depth[head];
@@ -384,11 +385,12 @@ fn scan_walk(o: Options, out: Finding[>..]&, scanned: i64&, skipped: i64&) {
                         q_add(path[..], depth + 1);
                     } else if ends_with(name, ".goose") {
                         var src: u8[>..] = [];
-                        if scanned >= o.max_files || !read_file(path[..], src)
+                        if budget <= 0 || !read_file(path[..], src)
                             || src.len > o.max_file {
                             skipped = skipped + 1;
                         } else {
                             scanned = scanned + 1;
+                            budget = budget - 1;
                             scan_text(path[..], src[..], o, out);
                         }
                     }
@@ -402,6 +404,17 @@ fn scan_walk(o: Options, out: Finding[>..]&, scanned: i64&, skipped: i64&) {
 // scan_dir scans every .goose file under the directory. It gives the
 // number of files scanned. The skipped count is the second result.
 fn scan_dir(dir: const u8[:], o: Options, out: Finding[>..]&) -> i64, i64 {
+    var budget = o.max_files;
+    return scan_dir_budget(dir, o, out, budget);
+}
+
+// scan_dir_budget scans every .goose file under the directory. The
+// budget holds the files that the run may still read. A run over
+// several trees shares one budget, so the file count bound covers the
+// whole run. It gives the number of files scanned. The skipped count
+// is the second result.
+fn scan_dir_budget(dir: const u8[:], o: Options, out: Finding[>..]&,
+                   budget: i64&) -> i64, i64 {
     var scanned: i64 = 0;
     var skipped: i64 = 0;
     q_at.resize(0, 0);
@@ -410,7 +423,7 @@ fn scan_dir(dir: const u8[:], o: Options, out: Finding[>..]&) -> i64, i64 {
     q_buf.resize(0, 0);
     vis_reset();
     q_add(dir, 0);
-    scan_walk(o, out, scanned, skipped);
+    scan_walk(o, out, scanned, skipped, budget);
     sort_findings(out);
     return scanned, skipped;
 }

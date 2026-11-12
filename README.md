@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.6.0";
+import sast from "rekanalar/goose-sast@v0.7.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.6.0";
+import sast from "rekanalar/goose-sast@v0.7.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -58,6 +58,8 @@ fn main() {
 | `read_advisories(text, err) -> bool` | reads the advisory JSON in the RustSec shape |
 | `check_deps(src, out) -> i64` | runs the ban, licence, source and advisory checks; gives the count |
 | `read_custom(text, err) -> bool` | reads a custom rule file; false on a fault |
+| `read_custom_more(text, err) -> bool` | adds the rules of a rule file to the rules of the run |
+| `read_config(text, mask, options, policy, advisories, rules, err) -> bool` | reads a config file; false on a fault |
 | `custom_reset()` | drops the custom rules of the run |
 | `reg_find(id) -> i64` | gives the registry index of an ID, or -1 |
 | `list_rules(out)` | writes one line per rule |
@@ -78,14 +80,51 @@ fn main() {
 | `-f text\|json\|sarif` | the output format; text is the default |
 | `-max-depth N` | the directory levels the walk reads |
 | `-max-files N` | the files the walk reads |
-| `-rules FILE` | loads custom rules from this file |
+| `-rules FILE` | loads custom rules from this file; the flag takes several files |
+| `-config FILE` | reads the settings of the run from this file |
 | `-policy FILE` | runs the dependency checks with this policy |
 | `-advisories FILE` | runs the advisory check with this file |
 | `-quiet` | prints nothing; the exit code stays |
 | `-no-fail` | always exits 0 |
 | `-list-rules` | prints the rule list |
 
+The command takes several targets. It scans each target in turn. A directory target runs the walk and a file target runs the text scan. The summary line counts the files of all targets.
+
 The exit code is 0 with no finding, 1 with findings and 2 when the scan fails.
+
+## Config file
+
+A config file holds the settings of a run. The command reads the file `.goose-sast.json` of the current directory. The `-config` flag names another file. The file is JSON:
+
+```json
+{
+  "min_severity": "medium",
+  "min_confidence": "low",
+  "exclude": "G401,G404",
+  "include": "",
+  "exclude_path": "vendor,third_party",
+  "policy": "policy.json",
+  "rules": "company.json,repo.json",
+  "advisories": "advisories.json",
+  "max_files": 4096,
+  "max_depth": 64
+}
+```
+
+| Key | Value |
+|---|---|
+| `min_severity` | `low`, `medium`, `high` or `critical` |
+| `min_confidence` | `low`, `medium` or `high` |
+| `exclude` | rule IDs that commas separate |
+| `include` | rule IDs that commas separate |
+| `exclude_path` | path parts that commas separate |
+| `policy` | the path of a policy file |
+| `rules` | the paths of rule files that commas separate |
+| `advisories` | the path of an advisory file |
+| `max_files` | a whole number |
+| `max_depth` | a whole number |
+
+A flag of the command line wins over the value of the file. A file that does not parse is a fault. A key that the command does not know is a fault. The fault names the key and the run ends with exit code 2.
 
 ## Suppression
 
@@ -119,7 +158,7 @@ A file of custom rules adds rules without a change to the package. The file is J
 | `exact` | true matches the whole token; false matches a part |
 | `message` | the message of the finding |
 
-A custom rule joins the registry. The filters, the suppressions and the exit code treat it like a built-in rule. A second `-rules` file replaces the first.
+A custom rule joins the registry. The filters, the suppressions and the exit code treat it like a built-in rule. Several `-rules` files merge. The rules of each file join the rules of the earlier files. A rule ID that two files hold is a fault that names the ID.
 
 ## Rules
 
@@ -165,7 +204,10 @@ The dependency checks report under their own IDs.
 - Most rules of the references have no Goose surface. The standard library holds no TLS, HTTP, SQL, archive or template code. The package leaves those rules out.
 - The advisory file holds the advisories of Rust packages. No Goose advisory database exists. The package reads the RustSec file format and reports the hits of the package names that match.
 - The tool runs offline. It reads no network and holds no database of its own.
-- The `sast` command reads one path per run.
+- The `sast` command takes several targets. The file count bound covers the whole run. The depth bound applies to each tree.
+- The config file sits in the current directory. The command does not walk up the tree to find it.
+- The rule IDs of a config file and of a flag name the built-in rules. The custom rules load after the lists, so a custom rule ID does not work there.
+- The dependency checks read the first target of a run.
 
 ## Security
 
@@ -176,3 +218,4 @@ The dependency checks report under their own IDs.
 - The output writes each byte outside printable ASCII as `\xNN`. A hostile path cannot inject a control sequence into a terminal.
 - A file that the scan cannot read counts as skipped. The summary line shows the count, so a skipped file never hides.
 - The scan runs no code from the files it reads.
+- The config file is read once per run. Its size is bounded like the size of a source file. A file that does not parse is a fault, never a silent default.

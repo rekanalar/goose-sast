@@ -19,6 +19,7 @@ import advise;
 import deps;
 import links;
 import custom;
+import config;
 import rules_taint;
 import semver from "rekanalar/goose-semver@v1.0.1";
 import format;

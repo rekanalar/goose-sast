@@ -380,6 +380,78 @@ fn main() {
     let root, jerr = json::parse(jo[..], doc, dec);
     check(root != null, "json parses");
 
+    // The rule files of a run merge. The second file adds its rules to
+    // the rules of the first file.
+    var cr2: u8[>..] = [];
+    read_file("test/custom/rules.json", cr2);
+    var cerr2: u8[>..] = [];
+    check(sast::read_custom(cr2[..], cerr2), "the first rule file parses");
+    let before_merge = sast::rule_count();
+    var more: u8[>..] = [];
+    for c in "{ \"rules\": [{\"id\":\"CO010\",\"severity\":\"low\",\"kind\":\"ident\",\"text\":\"zz\"}] }" { more.push(c); }
+    var merr: u8[>..] = [];
+    check(sast::read_custom_more(more[..], merr), "the second rule file parses");
+    check(sast::reg_find("CO001") >= 0, "the first file keeps its rules");
+    check(sast::reg_find("CO010") >= 0, "the second file adds its rules");
+    check(sast::rule_count() == before_merge + 1, "the registry holds both files");
+    // A rule ID that two files hold is a fault.
+    var dup: u8[>..] = [];
+    for c in "{ \"rules\": [{\"id\":\"CO010\",\"severity\":\"low\",\"kind\":\"ident\",\"text\":\"zz\"}] }" { dup.push(c); }
+    var derr: u8[>..] = [];
+    check(!sast::read_custom_more(dup[..], derr), "a duplicate rule ID faults");
+    check(derr.len > 0, "the fault names the rule");
+    sast::custom_reset();
+
+    // The config file holds the settings of a run.
+    var co = sast::default_options();
+    var cpol: u8[>..] = [];
+    var cadv: u8[>..] = [];
+    var crules: u8[>..] = [];
+    var cerr3: u8[>..] = [];
+    var ctext: u8[>..] = [];
+    for c in "{ \"min_severity\": \"high\", \"min_confidence\": \"medium\", \"max_files\": 12, \"max_depth\": 3, \"policy\": \"p.json\", \"rules\": \"a.json,b.json\" }" { ctext.push(c); }
+    check(sast::read_config(ctext[..], 0, co, cpol, cadv, crules, cerr3), "the config file parses");
+    check(co.min_severity == sast::SEV_HIGH, "the config sets the severity");
+    check(co.min_confidence == sast::CONF_MEDIUM, "the config sets the confidence");
+    check(co.max_files == 12, "the config sets the file bound");
+    check(co.max_depth == 3, "the config sets the depth bound");
+    check(cpol[..] == "p.json", "the config names the policy file");
+    check(crules[..] == "a.json,b.json", "the config names the rule files");
+    // A setting that the command line set keeps its value.
+    var co2 = sast::default_options();
+    co2.min_severity = sast::SEV_LOW;
+    var cpol2: u8[>..] = [];
+    var cadv2: u8[>..] = [];
+    var crules2: u8[>..] = [];
+    var cerr4: u8[>..] = [];
+    check(sast::read_config(ctext[..], sast::CFG_SEV, co2, cpol2, cadv2, crules2, cerr4), "the masked config parses");
+    check(co2.min_severity == sast::SEV_LOW, "the flag wins over the config");
+    check(co2.max_files == 12, "the config fills the other settings");
+    // A key that the command does not know is a fault.
+    var cbad: u8[>..] = [];
+    for c in "{ \"nope\": 1 }" { cbad.push(c); }
+    var cberr: u8[>..] = [];
+    check(!sast::read_config(cbad[..], 0, co2, cpol2, cadv2, crules2, cberr), "an unknown key faults");
+    check(cberr.len > 0, "the fault names the key");
+    // A value of the wrong shape is a fault.
+    var cbad2: u8[>..] = [];
+    for c in "{ \"min_severity\": 4 }" { cbad2.push(c); }
+    var cberr2: u8[>..] = [];
+    check(!sast::read_config(cbad2[..], 0, co2, cpol2, cadv2, crules2, cberr2), "a wrong shape faults");
+    check(cberr2.len > 0, "the fault names the key");
+    // A severity of an unknown name is a fault.
+    var cbad3: u8[>..] = [];
+    for c in "{ \"min_severity\": \"huge\" }" { cbad3.push(c); }
+    var cberr3: u8[>..] = [];
+    check(!sast::read_config(cbad3[..], 0, co2, cpol2, cadv2, crules2, cberr3), "an unknown severity faults");
+    check(cberr3.len > 0, "the fault names the key");
+    // A rule ID that no rule carries is a fault.
+    var cbad4: u8[>..] = [];
+    for c in "{ \"exclude\": \"NOPE\" }" { cbad4.push(c); }
+    var cberr4: u8[>..] = [];
+    check(!sast::read_config(cbad4[..], 0, co2, cpol2, cadv2, crules2, cberr4), "an unknown rule ID faults");
+    check(cberr4.len > 0, "the fault names the key");
+
     if fails > 0 { abort("some checks failed"); }
     print("all sast checks pass");
 }

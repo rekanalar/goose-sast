@@ -1,7 +1,7 @@
 // sast: the security linter command.
 //
 // Build: goose build cmd/sast.goose -o sast
-// Run:   sast [flags] <path>
+// Run:   sast [flags] <path> [<path>...]
 //
 // The command scans one file or a tree of .goose files and prints one
 // line per finding. It exits 0 with no finding, 1 with findings and 2
@@ -48,7 +48,7 @@ fn parse_num(s: const u8[:]) -> i64 {
 // usage prints the flags of the command.
 fn usage() {
     write_stderr("sast: a security linter for Goose source\n");
-    write_stderr("usage: sast [flags] <path>\n");
+    write_stderr("usage: sast [flags] <path> [<path>...]\n");
     write_stderr("  -severity low|medium|high|critical   the lowest severity to report (default low)\n");
     write_stderr("  -confidence low|medium|high          the lowest confidence to report (default low)\n");
     write_stderr("  -exclude ID[,ID]                     the rule IDs to leave out\n");
@@ -58,6 +58,7 @@ fn usage() {
     write_stderr("  -max-depth N                        the directory levels the walk reads\n");
     write_stderr("  -max-files N                        the files the walk reads\n");
     write_stderr("  -rules FILE                         load custom rules from this file\n");
+    write_stderr("  -config FILE                        read the settings of the run from this file\n");
     write_stderr("  -policy FILE                        run the dependency checks with this policy\n");
     write_stderr("  -advisories FILE                    run the advisory check with this file\n");
     write_stderr("  -quiet                               no output but the exit code\n");
@@ -94,6 +95,29 @@ fn target_at(i: i64) -> const u8[:] {
     return tgt_buf[tgt_at[i]..tgt_end[i]];
 }
 
+// The rule files of the run. The bytes live in one buffer and the two
+// offset lists hold the range of each file.
+var rules_buf: u8[>..] = [];
+var rules_at: i64[>..] = [];
+var rules_end: i64[>..] = [];
+
+// rules_push copies one rule file into the buffer.
+fn rules_push(s: const u8[:]) {
+    rules_at.push(rules_buf.len);
+    for b in s { rules_buf.push(b); }
+    rules_end.push(rules_buf.len);
+}
+
+// rules_file gives the path of the rule file i.
+fn rules_file(i: i64) -> const u8[:] {
+    return rules_buf[rules_at[i]..rules_end[i]];
+}
+
+// The count of the targets and the count of the rule files of a run
+// are bounded. A command with a long list ends with a fault.
+const MAX_TARGETS: i64 = 64;
+const MAX_RULES: i64 = 64;
+
 // main runs one scan.
 fn main() {
     var o = sast::default_options();
@@ -105,10 +129,15 @@ fn main() {
     var policy_path: u8[>..] = [];
     var adv_path: u8[>..] = [];
     var have_policy = false;
-    var rules_path: u8[>..] = [];
     var have_rules = false;
     var have_adv = false;
+    var config_path: u8[>..] = [];
+    var have_config = false;
     var target_count: i64 = 0;
+    // The bits of the settings that the command line set. A setting
+    // with its bit set keeps the value of the command line and the
+    // config file does not change it.
+    var mask: i64 = 0;
     var bad: u8[>..] = [];
 
     var i: i64 = 1;
@@ -122,8 +151,13 @@ fn main() {
             arg(i, v);
             let lvl = sev_of(v[..]);
             if lvl < 0 { die("the flag takes low, medium, high or critical"); }
-            if a[..] == "-severity" { o.min_severity = lvl; }
-            else { o.min_confidence = lvl; }
+            if a[..] == "-severity" {
+                o.min_severity = lvl;
+                mask = mask | sast::CFG_SEV;
+            } else {
+                o.min_confidence = lvl;
+                mask = mask | sast::CFG_CONF;
+            }
         } else if a[..] == "-exclude" || a[..] == "-include" {
             i = i + 1;
             if i >= arg_count() { die("the flag needs a value"); }
@@ -136,8 +170,13 @@ fn main() {
                 if sast::reg_find(ids[k]) < 0 {
                     format(bad, "no rule carries the ID ", ids[k], "\n");
                 }
-                if a[..] == "-exclude" { sast::opt_exclude(ids[k]); }
-                else { sast::opt_include(ids[k]); }
+                if a[..] == "-exclude" {
+                    sast::opt_exclude(ids[k]);
+                    mask = mask | sast::CFG_EXCL;
+                } else {
+                    sast::opt_include(ids[k]);
+                    mask = mask | sast::CFG_INCL;
+                }
                 k = k + 1;
             }
         } else if a[..] == "-exclude-path" {
@@ -150,6 +189,7 @@ fn main() {
             var k: i64 = 0;
             while k < parts.len {
                 sast::opt_skip_path(parts[k]);
+                mask = mask | sast::CFG_PATH;
                 k = k + 1;
             }
         } else if a[..] == "-f" {
@@ -168,15 +208,28 @@ fn main() {
             arg(i, v);
             let n = parse_num(v[..]);
             if n < 0 { die("the flag takes a number"); }
-            if a[..] == "-max-depth" { o.max_depth = n; }
-            else { o.max_files = n; }
+            if a[..] == "-max-depth" {
+                o.max_depth = n;
+                mask = mask | sast::CFG_DEPTH;
+            } else {
+                o.max_files = n;
+                mask = mask | sast::CFG_FILES;
+            }
         } else if a[..] == "-rules" {
             i = i + 1;
             if i >= arg_count() { die("the flag needs a value"); }
             var v: u8[>..] = [];
             arg(i, v);
-            for b in v { rules_path.push(b); }
+            rules_push(v[..]);
             have_rules = true;
+            mask = mask | sast::CFG_RULES;
+        } else if a[..] == "-config" {
+            i = i + 1;
+            if i >= arg_count() { die("the flag needs a value"); }
+            var v: u8[>..] = [];
+            arg(i, v);
+            for b in v { config_path.push(b); }
+            have_config = true;
         } else if a[..] == "-policy" || a[..] == "-advisories" {
             i = i + 1;
             if i >= arg_count() { die("the flag needs a value"); }
@@ -185,9 +238,11 @@ fn main() {
             if a[..] == "-policy" {
                 for b in v { policy_path.push(b); }
                 have_policy = true;
+                mask = mask | sast::CFG_POLICY;
             } else {
                 for b in v { adv_path.push(b); }
                 have_adv = true;
+                mask = mask | sast::CFG_ADV;
             }
         } else if a[..] == "-quiet" {
             quiet = true;
@@ -203,6 +258,7 @@ fn main() {
         } else {
             opt_push_target(a[..]);
             target_count = target_count + 1;
+            if target_count > MAX_TARGETS { die("too many targets"); }
         }
         i = i + 1;
     }
@@ -216,38 +272,103 @@ fn main() {
         exit(0);
     }
 
-    if target_count != 1 {
+    if target_count < 1 {
         usage();
         exit(2);
     }
 
-    if have_rules {
+    // The config file holds the settings that no flag set. The file of
+    // the current directory is read when no flag names another file.
+    var cfg_text: u8[>..] = [];
+    var cfg_policy: u8[>..] = [];
+    var cfg_adv: u8[>..] = [];
+    var cfg_rules: u8[>..] = [];
+    var cfg_err: u8[>..] = [];
+    var have_cfg = false;
+    if have_config {
+        if !read_file(config_path[..], cfg_text) {
+            die("cannot read the config file");
+        }
+        have_cfg = true;
+    } else if read_file(".goose-sast.json", cfg_text) {
+        have_cfg = true;
+    }
+    if have_cfg {
+        if cfg_text.len > sast::MAX_FILE {
+            die("the config file is above the size bound");
+        }
+        if !sast::read_config(cfg_text[..], mask, o, cfg_policy, cfg_adv,
+                              cfg_rules, cfg_err) {
+            die(cfg_err[..]);
+        }
+        if cfg_policy.len > 0 {
+            for b in cfg_policy { policy_path.push(b); }
+            have_policy = true;
+        }
+        if cfg_adv.len > 0 {
+            for b in cfg_adv { adv_path.push(b); }
+            have_adv = true;
+        }
+        if cfg_rules.len > 0 {
+            var parts: const u8[:][>..] = [];
+            split_list(cfg_rules[..], parts);
+            var k: i64 = 0;
+            while k < parts.len {
+                rules_push(parts[k]);
+                k = k + 1;
+            }
+        }
+    }
+    if rules_at.len > MAX_RULES { die("too many rule files"); }
+
+    // The rule files of the run merge. The first file resets the
+    // registry and the later files add their rules to it.
+    var rk: i64 = 0;
+    while rk < rules_at.len {
         var rules_text: u8[>..] = [];
         var rerr: u8[>..] = [];
-        if !read_file(rules_path[..], rules_text) {
+        if !read_file(rules_file(rk), rules_text) {
             die("cannot read the rules file");
         }
-        if !sast::read_custom(rules_text[..], rerr) { die(rerr[..]); }
+        if rules_text.len > sast::MAX_FILE {
+            die("the rules file is above the size bound");
+        }
+        if rk == 0 {
+            if !sast::read_custom(rules_text[..], rerr) { die(rerr[..]); }
+        } else {
+            if !sast::read_custom_more(rules_text[..], rerr) { die(rerr[..]); }
+        }
+        rk = rk + 1;
     }
 
     var findings: sast::Finding[>..] = [];
     var scanned: i64 = 0;
     var skipped: i64 = 0;
-    let dir_mode = is_dir(target_at(0));
-    if dir_mode {
-        scanned, skipped = sast::scan_dir(target_at(0), o, findings);
-    } else {
-        var src: u8[>..] = [];
-        if !read_file(target_at(0), src) {
-            die("cannot read the file");
+    var budget = o.max_files;
+    var t: i64 = 0;
+    while t < target_count {
+        let path = target_at(t);
+        if is_dir(path) {
+            let s, k = sast::scan_dir_budget(path, o, findings, budget);
+            scanned = scanned + s;
+            skipped = skipped + k;
+        } else {
+            var src: u8[>..] = [];
+            if !read_file(path, src) {
+                var msg: u8[>..] = [];
+                format(msg, "cannot read the target ", path, "\n");
+                die(msg[..]);
+            }
+            if src.len > o.max_file {
+                die("the file is above the size bound");
+            }
+            sast::scan_text(path, src[..], o, findings);
+            scanned = scanned + 1;
+            budget = budget - 1;
         }
-        if src.len > o.max_file {
-            die("the file is above the size bound");
-        }
-        sast::scan_text(target_at(0), src[..], o, findings);
-        sast::sort_findings(findings);
-        scanned = 1;
+        t = t + 1;
     }
+    sast::sort_findings(findings);
 
     var dep_bits: i64 = 0;
     if have_policy || have_adv {

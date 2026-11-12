@@ -79,6 +79,15 @@ fn cr_holds(i: i64, word: const u8[:]) -> bool {
 // message in err.
 fn read_custom(text: const u8[:], err: u8[>..]&) -> bool {
     custom_reset();
+    return read_custom_more(text, err);
+}
+
+// read_custom_more reads a custom rule file and adds its rules to the
+// registry of the run. It keeps the rules that the earlier files
+// added. A rule ID that the registry holds is a fault.
+fn read_custom_more(text: const u8[:], err: u8[>..]&) -> bool {
+    reg_ensure();
+    if cr_base < 0 { cr_base = reg_id_s.len; }
     var scratch: u8[>..] = [];
     var r = json::reader(text);
     var bad: u8[>..] = [];

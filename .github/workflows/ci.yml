@@ -147,6 +147,56 @@ jobs:
           # The block suppression covers the lines between the markers.
           printf '// nosec:start\nlet a = "0.0.0.0";\n// nosec:end\n' > "$RUNNER_TEMP/clean/b.goose"
           "$RUNNER_TEMP/sast" "$RUNNER_TEMP/clean" | grep -q "0 finding"
+          # Several targets in one run. The summary counts the files of
+          # all targets.
+          mkdir -p "$RUNNER_TEMP/t1" "$RUNNER_TEMP/t2"
+          printf 'listen("0.0.0.0", p);\n' > "$RUNNER_TEMP/t1/x.goose"
+          printf 'let password = "hunter2hunter2";\n' > "$RUNNER_TEMP/t2/y.goose"
+          "$RUNNER_TEMP/sast" -no-fail "$RUNNER_TEMP/t1" "$RUNNER_TEMP/t2" > out.txt
+          grep -q "2 file(s) scanned" out.txt
+          grep -q "G101" out.txt
+          # A target that does not exist is a fault.
+          set +e
+          "$RUNNER_TEMP/sast" "$RUNNER_TEMP/t1" "$RUNNER_TEMP/nosuch" 2> /dev/null
+          code=$?
+          set -e
+          test "$code" = 2
+          # The config file holds the settings of a run.
+          printf '{ "min_severity": "high" }\n' > "$RUNNER_TEMP/cfg.json"
+          "$RUNNER_TEMP/sast" -config "$RUNNER_TEMP/cfg.json" -no-fail "$RUNNER_TEMP/t1" | grep -q "0 finding"
+          # A flag wins over the config file.
+          "$RUNNER_TEMP/sast" -config "$RUNNER_TEMP/cfg.json" -severity low -no-fail "$RUNNER_TEMP/t2" | grep -q "G101"
+          # A broken config file is a fault.
+          printf '{ "nope": 1 }\n' > "$RUNNER_TEMP/bad.json"
+          set +e
+          "$RUNNER_TEMP/sast" -config "$RUNNER_TEMP/bad.json" "$RUNNER_TEMP/t1" 2> /dev/null
+          code=$?
+          set -e
+          test "$code" = 2
+          # The rule files of a run merge.
+          printf '{ "rules": [ { "id": "HA01", "severity": "high", "kind": "ident", "text": "legacy_login" } ] }\n' > "$RUNNER_TEMP/r1.json"
+          printf '{ "rules": [ { "id": "HA02", "severity": "high", "kind": "ident", "text": "old_pass" } ] }\n' > "$RUNNER_TEMP/r2.json"
+          printf 'legacy_login(u, p);\nold_pass(u, p);\n' > "$RUNNER_TEMP/t1/x.goose"
+          "$RUNNER_TEMP/sast" -no-fail -rules "$RUNNER_TEMP/r1.json" -rules "$RUNNER_TEMP/r2.json" "$RUNNER_TEMP/t1" > out.txt
+          grep -q "HA01" out.txt
+          grep -q "HA02" out.txt
+          # A file target beside a directory target.
+          "$RUNNER_TEMP/sast" -no-fail "$RUNNER_TEMP/t1" "$RUNNER_TEMP/t2/y.goose" > out.txt
+          grep -q "2 file(s) scanned" out.txt
+          # The file count bound covers the targets of a run.
+          "$RUNNER_TEMP/sast" -no-fail -max-files 1 "$RUNNER_TEMP/t1" "$RUNNER_TEMP/t2" > out.txt
+          grep -q "1 file(s) scanned" out.txt
+          grep -q "1 file(s) skipped" out.txt
+          # The config file names the rule files and the policy file.
+          printf '{ "rules": "%s" }\n' "$RUNNER_TEMP/r2.json" > "$RUNNER_TEMP/cfg2.json"
+          "$RUNNER_TEMP/sast" -no-fail -config "$RUNNER_TEMP/cfg2.json" "$RUNNER_TEMP/t1" > out.txt
+          grep -q "HA02" out.txt
+          printf '{ "policy": "test/deps/policy.json", "advisories": "test/deps/advisories.json" }\n' > "$RUNNER_TEMP/cfg3.json"
+          set +e
+          "$RUNNER_TEMP/sast" -config "$RUNNER_TEMP/cfg3.json" test/deps/root.goose > out.txt
+          code=$?
+          set -e
+          test "$code" = 7
           # The dependency checks read the policy and the advisory file.
           set +e
           "$RUNNER_TEMP/sast" -policy test/deps/policy.json \
