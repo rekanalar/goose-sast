@@ -10,10 +10,10 @@ Every secret in it is fake.
 
 | File | Kinds | What it shows |
 |---|---|---|
-| `rules/secrets.json` | `string`, `ident` | private keys, key prefixes, secret names |
+| `rules/secrets.json` | `ident` | secret names and a private key variable |
 | `rules/house-style.json` | `ident` | exact and partial names that a team forbids |
 | `rules/comments.json` | `comment` | open tasks, hacks, a password in a comment |
-| `rules/regex.json` | `regex` | token shapes, IPv4, email, plain http |
+| `rules/regex.json` | `regex` | IPv4, email, plain http |
 | `custom-rules.json` | `ident` | the two rules of the `custom.goose` program |
 
 A `regex` rule takes no `^` or `$` and no `(?m)`. The regex engine of the

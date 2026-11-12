@@ -1,9 +1,6 @@
 // A sample file for the rule files. Every secret here is fake.
 let api_secret = "not-a-real-value";
-let private_key = "-----BEGIN PRIVATE KEY-----";
-let aws = "AKIAABCDEFGHIJKLMNOP";
-let gh = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
-let slack = "xoxb-123456789-abcdef";
+let private_key = "not-a-real-key";
 let host = "10.20.30.40";
 let owner = "dev@example.com";
 let url = "http://internal.example.com/api";

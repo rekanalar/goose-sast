@@ -370,6 +370,20 @@ jobs:
           grep -q "3 file(s) scanned" out.txt
           if grep -q "left out" out.txt; then echo "the profile all left out a directory"; exit 1; fi
           "$RUNNER_TEMP/sast" -no-fail -f json test/walk | grep -q '"left_out":2'
+          # A secret shape reports with exit code 1 and the output holds
+          # no byte of the key. The key is built from pieces, so no file
+          # of the package holds a whole shape.
+          printf '%s%s%s\n' 'let k = "AK' 'IA' '2222222222222222";' > "$RUNNER_TEMP/shape.goose"
+          code=0; "$RUNNER_TEMP/sast" "$RUNNER_TEMP/shape.goose" > out.txt || code=$?
+          test "$code" = 1
+          grep -q "S101" out.txt
+          if grep -q "22222222" out.txt; then echo "the output holds a key byte"; exit 1; fi
+          printf 'let k = 1;\n' > "$RUNNER_TEMP/clean.goose"
+          "$RUNNER_TEMP/sast" "$RUNNER_TEMP/clean.goose" > /dev/null
+          # No tracked file holds a whole shape.
+          if git ls-files | xargs grep -lE '(AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}|xox[bparso]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY'; then
+            echo "a tracked file holds a whole secret shape"; exit 1
+          fi
           # The config file holds the profile, and the flag wins over it.
           printf '{ "profile": "all" }\n' > "$RUNNER_TEMP/prof.json"
           "$RUNNER_TEMP/sast" -no-fail -config "$RUNNER_TEMP/prof.json" test/walk | grep -q "3 file(s) scanned"

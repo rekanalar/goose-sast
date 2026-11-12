@@ -1,6 +1,7 @@
 // The tests of the linter: each rule on a source text, the filters,
 // the suppression comments and the escape of hostile bytes.
 import std;
+import os;
 import json;
 import sast from "..";
 import semver from "rekanalar/goose-semver@v1.0.1";
@@ -51,6 +52,86 @@ fn scan_tree(path: const u8[:], profile: i64) -> i64 {
     var budget = o.max_files;
     let scanned, skipped = sast::scan_dir_budget(path, o, fs, budget);
     return scanned;
+}
+
+
+// The shape tests build each value from pieces at run time, so that no
+// file of the package holds a whole shape.
+fn put(b: u8[>..]&, s: const u8[:]) { for c in s { b.push(c); } }
+
+fn fill(b: u8[>..]&, c: u8, n: i64) {
+    var i: i64 = 0;
+    while i < n { b.push(c); i = i + 1; }
+}
+
+// s_count gives the findings of the rule ID under the default profile.
+fn s_count(src: const u8[:], id: const u8[:]) -> i64 {
+    return count_rule_profile(src, id, sast::PROFILE_DEFAULT);
+}
+
+// chk builds lead, a, b, n bytes of c and tail. It checks the count of
+// the rule ID.
+fn chk(lead: const u8[:], a: const u8[:], b: const u8[:], c: u8, n: i64,
+       tail: const u8[:], id: const u8[:], want: i64, what: const u8[:]) {
+    var buf: u8[>..] = [];
+    put(buf, lead); put(buf, a); put(buf, b);
+    fill(buf, c, n);
+    put(buf, tail);
+    check(s_count(buf[..], id) == want, what);
+}
+
+// holds reports whether the text holds the needle.
+fn holds(hay: const u8[:], needle: const u8[:]) -> bool {
+    var i: i64 = 0;
+    while i + needle.len <= hay.len {
+        if hay[i..i + needle.len] == needle { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// shape_id gives the ID of the shape rule at the place i.
+fn shape_id(i: i64) -> const u8[:] {
+    if i == 0 { return "S101"; }
+    if i == 1 { return "S102"; }
+    if i == 2 { return "S103"; }
+    return "S104";
+}
+
+// key_type gives the type word of a private key header and a space.
+fn key_type(i: i64) -> const u8[:] {
+    if i == 0 { return ""; }
+    if i == 1 { return "RSA "; }
+    if i == 2 { return "EC "; }
+    if i == 3 { return "DSA "; }
+    if i == 4 { return "OPENSSH "; }
+    if i == 5 { return "PGP "; }
+    return "ENCRYPTED ";
+}
+
+// no_secret checks that an output holds no secret and no run of its body.
+fn no_secret(out: const u8[:], a: const u8[:], b: const u8[:], c: const u8[:]) {
+    check(!holds(out, a) && !holds(out, b) && !holds(out, c), "no output holds a secret");
+    check(!holds(out, "22222222") && !holds(out, "aaaaaaaa") && !holds(out, "bbbbbbbb"), "no output holds a body");
+}
+
+// self_scan gives the count of the shape findings in a file of the package.
+fn self_scan(path: const u8[:]) -> i64 {
+    var text: u8[>..] = [];
+    read_file(path, text);
+    var n: i64 = 0;
+    var i: i64 = 0;
+    while i < 4 { n = n + s_count(text[..], shape_id(i)); i = i + 1; }
+    return n;
+}
+
+// shape_time gives the milliseconds that nl_build and rule_shapes take
+// on the buffer, and the count of the findings.
+fn shape_time(buf: const u8[:]) -> i64, i64 {
+    var out: sast::Finding[>..] = [];
+    let t0 = clock_ns();
+    let n = sast::rule_shapes(buf, 0, out);
+    return (clock_ns() - t0) / 1000000, n;
 }
 
 fn main() {
@@ -776,6 +857,246 @@ fn main() {
     check(count_rule_profile("zzprof(x);\n", "CO830", sast::PROFILE_STRICT) == 1, "a custom rule runs in the strict profile");
     check(count_rule_profile("zzprof(x);\n", "CO830", sast::PROFILE_ALL) == 1, "a custom rule runs in the profile all");
     sast::custom_reset();
+
+    // The built-in secret shapes S101 to S104.
+    sast::opt_reset();
+    chk("let k = \"", "AK", "IA", 50, 16, "\";\n", "S101", 1, "S101 AKIA");
+    chk("let k = \"", "AS", "IA", 50, 16, "\";\n", "S101", 1, "S101 ASIA");
+    chk("let k = \"", "AB", "IA", 50, 16, "\";\n", "S101", 1, "S101 ABIA");
+    chk("let k = \"", "AC", "CA", 50, 16, "\";\n", "S101", 1, "S101 ACCA");
+    chk("// the key ", "AK", "IA", 50, 16, "\n", "S101", 1, "S101 in a comment");
+    chk("let k = r\"", "AK", "IA", 50, 16, "\";\n", "S101", 1, "S101 in a raw string");
+    chk("", "AK", "IA", 50, 16, "", "S101", 1, "S101 at byte 0 at the end of the file");
+    chk("let k = \"", "AK", "IA", 50, 15, "\";\n", "S101", 0, "S101 body too short");
+    chk("let k = \"", "AK", "IA", 50, 17, "\";\n", "S101", 0, "S101 body too long");
+    chk("let k = \"x", "AK", "IA", 50, 16, "\";\n", "S101", 0, "S101 letter before");
+    chk("let k = \"9", "AK", "IA", 50, 16, "\";\n", "S101", 0, "S101 digit before");
+    chk("let k = \"", "ak", "ia", 50, 16, "\";\n", "S101", 0, "S101 lower case prefix");
+    chk("let k = \"", "AK", "IB", 50, 16, "\";\n", "S101", 0, "S101 wrong prefix");
+    chk("let k = \"", "AK", "IA", 48, 16, "\";\n", "S101", 0, "S101 body byte 0");
+    chk("let k = \"", "AK", "IA", 56, 16, "\";\n", "S101", 0, "S101 body byte 8");
+    chk("let k = \"", "AK", "IA", 97, 16, "\";\n", "S101", 0, "S101 lower case body");
+    // The documented example key of the AWS documentation reports.
+    var ex: u8[>..] = [];
+    put(ex, "let k = \"AK"); put(ex, "IAIOSFODNN7"); put(ex, "EXAMPLE\";\n");
+    check(s_count(ex[..], "S101") == 1, "S101 documented example key");
+    // A byte above 127 before the prefix is a boundary.
+    var hi: u8[>..] = [];
+    hi.push(195); put(hi, "AK"); put(hi, "IA"); fill(hi, 50, 16);
+    check(s_count(hi[..], "S101") == 1, "S101 after a byte above 127");
+    // Two keys on one line, and CRLF line ends.
+    var two: u8[>..] = [];
+    put(two, "a(\"AK"); put(two, "IA"); fill(two, 50, 16); put(two, "\", \"AK"); put(two, "IA"); fill(two, 51, 16); put(two, "\");\n");
+    check(s_count(two[..], "S101") == 2, "S101 two keys on a line");
+    var crlf: u8[>..] = [];
+    crlf.push(120); crlf.push(13); crlf.push(10);
+    put(crlf, "let k = \"AK"); put(crlf, "IA"); fill(crlf, 50, 16); put(crlf, "\";"); crlf.push(13); crlf.push(10);
+    check(s_count(crlf[..], "S101") == 1, "S101 with CRLF line ends");
+    // A key split across a line break is no key.
+    var split: u8[>..] = [];
+    put(split, "AK"); put(split, "IA"); fill(split, 50, 8); split.push(10); fill(split, 50, 8);
+    check(s_count(split[..], "S101") == 0, "S101 split across a line break");
+    // The position is the first byte of the key.
+    var pos: sast::Finding[>..] = [];
+    var pb: u8[>..] = [];
+    put(pb, "let k = \"AK"); put(pb, "IA"); fill(pb, 50, 16); put(pb, "\";\n");
+    sast::findings_reset();
+    sast::scan_text("src/a.goose", pb[..], sast::default_options(), pos);
+    var found_pos = false;
+    for f in pos { if f.rule == sast::reg_find("S101") && f.line == 1 && f.col == 10 { found_pos = true; } }
+    check(found_pos, "S101 line and column of the first byte");
+
+    // S102: the five classic prefixes, the fine-grained prefix.
+    let gl = "pousr";
+    var gi: i64 = 0;
+    while gi < 5 {
+        chk("let t = \"gh", gl[gi..gi + 1], "_", 97, 36, "\";\n", "S102", 1, "S102 classic prefix");
+        gi = gi + 1;
+    }
+    chk("let t = \"gh", "p", "_", 97, 35, "\";\n", "S102", 0, "S102 classic 35 bytes");
+    chk("let t = \"gh", "p", "_", 97, 37, "\";\n", "S102", 0, "S102 classic 37 bytes");
+    chk("let t = \"x", "gh", "p_", 97, 36, "\";\n", "S102", 0, "S102 letter before");
+    chk("let t = \"_", "gh", "p_", 97, 36, "\";\n", "S102", 1, "S102 classic after an underscore");
+    chk("let t = \"gh", "p", "_", 45, 36, "\";\n", "S102", 0, "S102 body byte outside the class");
+    chk("let t = \"GH", "P", "_", 97, 36, "\";\n", "S102", 0, "S102 upper case prefix");
+    chk("let t = \"gh", "z", "_", 97, 36, "\";\n", "S102", 0, "S102 wrong prefix letter");
+    chk("let t = \"github", "_", "pat_", 97, 82, "\";\n", "S102", 1, "S102 fine-grained");
+    chk("let t = \"github", "_", "pat_", 95, 82, "\";\n", "S102", 1, "S102 fine-grained underscore body");
+    chk("let t = \"github", "_", "pat_", 97, 81, "\";\n", "S102", 0, "S102 fine-grained 81 bytes");
+    chk("let t = \"github", "_", "pat_", 97, 83, "\";\n", "S102", 0, "S102 fine-grained 83 bytes");
+    chk("let t = \"_github", "_", "pat_", 97, 82, "\";\n", "S102", 0, "S102 underscore before the fine-grained prefix");
+    // The example token of the GitHub documentation reports.
+    var gx: u8[>..] = [];
+    put(gx, "let t = \"gh"); put(gx, "p_"); put(gx, "16C7e42F292c6912E7710c838347Ae178B4a\";\n");
+    check(s_count(gx[..], "S102") == 1, "S102 documented example token");
+    // A classic token inside a fine-grained token gives two findings.
+    var nest: u8[>..] = [];
+    put(nest, "let t = \"github"); put(nest, "_pat_"); put(nest, "gh"); put(nest, "p_"); fill(nest, 65, 36); put(nest, "_"); fill(nest, 66, 41); put(nest, "\";\n");
+    check(s_count(nest[..], "S102") == 2, "S102 classic token inside a fine-grained token");
+
+    // S103.
+    let sl = "bparsx";
+    var si: i64 = 0;
+    while si < 5 {
+        chk("let t = \"xox", sl[si..si + 1], "-", 97, 10, "\";\n", "S103", 1, "S103 prefix, 10 bytes");
+        chk("let t = \"xox", sl[si..si + 1], "-", 45, 72, "\";\n", "S103", 1, "S103 prefix, 72 bytes");
+        si = si + 1;
+    }
+    chk("let t = \"xapp", "-", "1-", 97, 10, "\";\n", "S103", 1, "S103 app, 10 bytes");
+    chk("let t = \"xapp", "-", "1-", 97, 80, "\";\n", "S103", 1, "S103 app, 80 bytes");
+    chk("let t = \"xox", "b", "-", 97, 73, "\";\n", "S103", 0, "S103 bot body of 73 bytes");
+    chk("let t = \"xapp", "-", "1-", 97, 81, "\";\n", "S103", 0, "S103 app body of 81 bytes");
+    chk("let t = \"xox", "o", "-", 97, 20, "\";\n", "S103", 0, "S103 prefix with the letter o");
+    chk("let t = \"xox", "b", "-", 97, 9, "\";\n", "S103", 0, "S103 body of 9 bytes");
+    chk("let t = \"xox", "z", "-", 97, 20, "\";\n", "S103", 0, "S103 wrong prefix");
+    chk("let t = \"x", "xo", "xb-", 97, 20, "\";\n", "S103", 0, "S103 letter before");
+    chk("let t = \"xapp", "-", "x-", 97, 20, "\";\n", "S103", 0, "S103 app without a digit");
+    // Two tokens joined by one hyphen are one long body: one finding.
+    var hy: u8[>..] = [];
+    put(hy, "a(\"xox"); put(hy, "b-"); fill(hy, 97, 12); put(hy, "-xox"); put(hy, "b-"); fill(hy, 98, 12); put(hy, "\");\n");
+    check(s_count(hy[..], "S103") == 1, "S103 two tokens joined by a hyphen");
+    // Two tokens in two strings are two findings.
+    var hy2: u8[>..] = [];
+    put(hy2, "a(\"xox"); put(hy2, "b-"); fill(hy2, 97, 12); put(hy2, "\", \"xox"); put(hy2, "b-"); fill(hy2, 98, 12); put(hy2, "\");\n");
+    check(s_count(hy2[..], "S103") == 2, "S103 two tokens in two strings");
+
+    // S104.
+    var ti: i64 = 0;
+    while ti < 7 {
+        var hd: u8[>..] = [];
+        put(hd, "let p = \"-----"); put(hd, "BEGIN "); put(hd, key_type(ti)); put(hd, "PRIVATE"); put(hd, " KEY"); put(hd, "-----\";\n");
+        check(s_count(hd[..], "S104") == 1, "S104 header");
+        ti = ti + 1;
+    }
+    var pg: u8[>..] = [];
+    put(pg, "// -----"); put(pg, "BEGIN PGP "); put(pg, "PRIVATE KEY"); put(pg, " BLOCK-----\n");
+    check(s_count(pg[..], "S104") == 1, "S104 PGP block in a comment");
+    var blk: u8[>..] = [];
+    put(blk, "let p = \"-----"); put(blk, "BEGIN RSA "); put(blk, "PRIVATE KEY"); put(blk, " BLOCK-----\";\n");
+    check(s_count(blk[..], "S104") == 0, "S104 block text after a type word other than PGP");
+    var pub: u8[>..] = [];
+    put(pub, "let p = \"-----"); put(pub, "BEGIN PUBLIC"); put(pub, " KEY-----\";\n");
+    check(s_count(pub[..], "S104") == 0, "S104 public key header");
+    var d4: u8[>..] = [];
+    put(d4, "let p = \"----"); put(d4, "BEGIN "); put(d4, "PRIVATE KEY"); put(d4, "-----\";\n");
+    check(s_count(d4[..], "S104") == 0, "S104 four dashes");
+    var sp4: u8[>..] = [];
+    put(sp4, "-----"); put(sp4, "BEGIN "); sp4.push(10); put(sp4, "PRIVATE KEY"); put(sp4, "-----\n");
+    check(s_count(sp4[..], "S104") == 0, "S104 split across a line break");
+
+    // The registry rows, the filters and the suppression.
+    var ri: i64 = 0;
+    while ri < 4 {
+        check(sast::reg_find(shape_id(ri)) >= 0, "the shape rule is in the registry");
+        check(count_rule_profile("x\n", shape_id(ri), sast::PROFILE_ALL) == 0, "the shape rule is clean on clean text");
+        ri = ri + 1;
+    }
+    var all4: u8[>..] = [];
+    put(all4, "a(\"AK"); put(all4, "IA"); fill(all4, 50, 16); put(all4, "\");\n");
+    put(all4, "b(\"gh"); put(all4, "p_"); fill(all4, 97, 36); put(all4, "\");\n");
+    put(all4, "c(\"xox"); put(all4, "b-"); fill(all4, 97, 12); put(all4, "\");\n");
+    put(all4, "d(\"-----"); put(all4, "BEGIN "); put(all4, "PRIVATE KEY"); put(all4, "-----\");\n");
+    var pi: i64 = 0;
+    while pi < 3 {
+        var n4: i64 = 0;
+        var qi: i64 = 0;
+        while qi < 4 { n4 = n4 + count_rule_profile(all4[..], shape_id(qi), pi); qi = qi + 1; }
+        check(n4 == 4, "the four shapes report in every profile");
+        pi = pi + 1;
+    }
+    var oi = sast::default_options();
+    sast::opt_include("S102");
+    check(count_rule_with(all4[..], "S102", oi) == 1 && count_rule_with(all4[..], "S101", oi) == 0, "include S102 leaves S102 only");
+    var ox = sast::default_options();
+    sast::opt_exclude("S101");
+    check(count_rule_with(all4[..], "S101", ox) == 0, "exclude S101");
+    check(count_rule_with(all4[..], "S102", ox) == 1, "exclude S101 keeps S102");
+    sast::opt_reset();
+    var sup: u8[>..] = [];
+    put(sup, "a(\"AK"); put(sup, "IA"); fill(sup, 50, 16); put(sup, "\"); // nosec S101\n");
+    check(s_count(sup[..], "S101") == 0, "a shape in a suppression range stays out");
+    // A config file with an exclude of S101 removes S101.
+    var cfo = sast::default_options();
+    var cfp: u8[>..] = [];
+    var cfa: u8[>..] = [];
+    var cfr: u8[>..] = [];
+    var cfe: u8[>..] = [];
+    var cft: u8[>..] = [];
+    put(cft, "{ \"exclude\": \"S101\" }");
+    check(sast::read_config(cft[..], 0, cfo, cfp, cfa, cfr, cfe), "the config with exclude S101 reads");
+    check(count_rule_with(all4[..], "S101", cfo) == 0, "config exclude S101");
+    sast::opt_reset();
+    // A custom rule with a built-in ID is a fault, and S105 is free.
+    var cs: u8[>..] = [];
+    var cse: u8[>..] = [];
+    put(cs, "{\"rules\":[{\"id\":\"S101\",\"severity\":\"low\",\"kind\":\"ident\",\"text\":\"zz\"}]}");
+    check(!sast::read_custom(cs[..], cse), "a custom rule with the ID S101 is a fault");
+    check(holds(cse[..], "S101"), "the fault names the ID");
+    sast::custom_reset();
+    var cs5: u8[>..] = [];
+    var cse5: u8[>..] = [];
+    put(cs5, "{\"rules\":[{\"id\":\"S105\",\"severity\":\"low\",\"kind\":\"ident\",\"text\":\"zz\"}]}");
+    check(sast::read_custom(cs5[..], cse5), "a custom rule with the ID S105 loads");
+    sast::custom_reset();
+    // -list-rules holds the four rows.
+    var lrs: u8[>..] = [];
+    sast::list_rules(lrs);
+    var li: i64 = 0;
+    while li < 4 { check(holds(lrs[..], shape_id(li)), "list_rules holds the shape rule"); li = li + 1; }
+
+    // No output channel holds a byte of a match.
+    var secrets: u8[>..] = [];
+    put(secrets, "AK"); put(secrets, "IA"); fill(secrets, 50, 16);
+    var sc2: u8[>..] = [];
+    put(sc2, "gh"); put(sc2, "p_"); fill(sc2, 97, 36);
+    var sc3: u8[>..] = [];
+    put(sc3, "xox"); put(sc3, "b-"); fill(sc3, 98, 12);
+    var channel_fs: sast::Finding[>..] = [];
+    sast::findings_reset();
+    sast::scan_text("src/a.goose", all4[..], sast::default_options(), channel_fs);
+    var ctext: u8[>..] = [];
+    var cjson: u8[>..] = [];
+    var csarif: u8[>..] = [];
+    sast::format_text(channel_fs[..], ctext);
+    sast::format_json(channel_fs[..], 1, 0, cjson);
+    sast::format_sarif(channel_fs[..], csarif);
+    check(channel_fs.len == 4, "the channel check has four findings");
+    no_secret(ctext[..], secrets[..], sc2[..], sc3[..]);
+    no_secret(cjson[..], secrets[..], sc2[..], sc3[..]);
+    no_secret(csarif[..], secrets[..], sc2[..], sc3[..]);
+
+    // The hostile files stay inside the time bound.
+    var hostile: u8[>..] = [];
+    fill(hostile, 65, 10000000);
+    let ms_a, n_a = shape_time(hostile[..]);
+    check(n_a == 0 && ms_a < 4000, "10 MB of the letter A");
+    var hostile2: u8[>..] = [];
+    var hi2: i64 = 0;
+    while hi2 < 2500000 { put(hostile2, "AKIA"); hi2 = hi2 + 1; }
+    let ms_b, n_b = shape_time(hostile2[..]);
+    check(ms_b < 2000, "2.5 million repeats of AKIA");
+    var hostile3: u8[>..] = [];
+    put(hostile3, "xox"); put(hostile3, "b-"); fill(hostile3, 45, 1000000);
+    let ms_c, n_c = shape_time(hostile3[..]);
+    check(n_c == 0 && ms_c < 1000, "xoxb- and a million hyphens");
+    // More matches than the bound: the cap holds.
+    var many: u8[>..] = [];
+    var mi: i64 = 0;
+    while mi < 70000 {
+        put(many, " AK"); put(many, "IA"); fill(many, 50, 16);
+        mi = mi + 1;
+    }
+    var mfs: sast::Finding[>..] = [];
+    sast::nl_build(many[..]);
+    let nm = sast::rule_shapes(many[..], 0, mfs);
+    check(nm <= sast::MAX_FILE_MATCHES && nm > 0, "the cap of the matches of one file");
+
+    // The package files hold no whole shape.
+    check(self_scan("test/run.goose") == 0, "test/run.goose holds a whole shape");
+    check(self_scan("README.md") == 0, "README.md holds a whole shape");
+    check(self_scan("examples/rules/secrets.json") == 0, "secrets.json holds a whole shape");
+    check(self_scan("examples/rules/regex.json") == 0, "regex.json holds a whole shape");
+    check(self_scan("examples/samples/secrets.goose") == 0, "the sample holds a whole shape");
 
     if fails > 0 { abort("some checks failed"); }
     print("all sast checks pass");

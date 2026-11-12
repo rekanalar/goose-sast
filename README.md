@@ -9,7 +9,7 @@ The package is a library and a command. The library scans a text or a tree and g
 ## Install
 
 ```goose
-import sast from "rekanalar/goose-sast@v0.9.0";
+import sast from "rekanalar/goose-sast@v0.10.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 ```
 
@@ -28,7 +28,7 @@ sast [flags] <path>
 
 ```goose
 import std;
-import sast from "rekanalar/goose-sast@v0.9.0";
+import sast from "rekanalar/goose-sast@v0.10.0";
 import semver from "rekanalar/goose-semver@v1.0.1";
 
 fn main() {
@@ -245,6 +245,7 @@ The rule IDs follow the IDs of `gosec` and `bandit`, with the aliases below. Run
 | B110 (B112) | an empty catch body |
 | B113 | a `wait` with a zero limit |
 | B607, B609 | a partial command path, a wildcard argument |
+| S101 to S104 | a secret by its shape: see the secret shapes below |
 
 The dependency checks report under their own IDs.
 
@@ -283,6 +284,37 @@ The dependency checks report under their own IDs.
 - The exit code of the dependency checks shares its values with the exit codes of the scan. A caller that needs to tell the two apart reads the output.
 - The command reads the file `.goose-sast.json` of the current directory. A checkout that holds that file sets the settings of the run.
 
+## Secret shapes
+
+Four rules find a leaked secret by its shape. They run in every profile and need no setup. They search the whole text of the file, so a secret in a comment reports too. The rule G101 reads a name beside a literal and does not do this.
+
+| Rule | Shape | Severity | CWE |
+|---|---|---|---|
+| S101 | an AWS access key ID: `AKIA`, `ASIA`, `ABIA` or `ACCA` and 16 bytes from `A` to `Z` and `2` to `7` | critical | 798 |
+| S102 | a GitHub token: `ghp_`, `gho_`, `ghu_`, `ghs_` or `ghr_` and 36 letters or digits, or `github_pat_` and 82 letters, digits or underscores | critical | 798 |
+| S103 | a Slack token: `xoxb-`, `xoxp-`, `xoxa-`, `xoxr-` or `xoxs-` and 10 to 72 bytes, or `xapp-`, a digit, a hyphen and 10 to 80 bytes | high | 798 |
+| S104 | the header of a private key, with an optional type word such as `RSA` or `OPENSSH`, or the PGP block header | critical | 321 |
+
+No letter or digit may stand before a shape. A body that runs past the length of the shape gives no finding. gitleaks and Semgrep secrets ship the same families. The shapes here follow the rules `aws-access-token`, `github-pat`, `github-fine-grained-pat`, `github-oauth`, `github-app-token`, `github-refresh-token`, `slack-bot-token`, `slack-user-token`, `slack-app-token` and `private-key` of gitleaks. Five differences stay:
+
+- gitleaks reads the key of `private-key` too. It needs a body of 64 bytes after the header. This package reports the header alone.
+- gitleaks takes the family `A3T` for an AWS key. This package takes `AKIA`, `ASIA`, `ABIA` and `ACCA` only.
+- gitleaks wants two groups of digits in a Slack bot token. This package takes any body of 10 to 72 letters, digits or hyphens.
+- The boundary of gitleaks is a word boundary, so an underscore counts as part of a word. For a classic GitHub token and a Slack token, this package stops at a letter or a digit only.
+- gitleaks reads `ghp_` in `github-pat`. This package takes the five prefixes `ghp_`, `gho_`, `ghu_`, `ghs_` and `ghr_` in one rule.
+
+A finding shows the line and the column of the first byte. Filter and suppress the four rules like any rule.
+
+```
+src/deploy.goose:12:10: critical: S101: an AWS access key ID is in the source
+```
+- A line that holds one of the four shapes now reports. An earlier release reported nothing for such a line, in a string or a comment. This is a break of the default run.
+- The shapes have no entropy test and no check that a key is live. A rotated or revoked key still reports. Only four families exist. Stripe, Google, Azure, npm and other providers give no finding.
+- The documented example keys report like any other value. The example key of the AWS documentation and the example token of the GitHub documentation both match their shapes. gitleaks drops them by a list of words. This package has no such list, so suppress the line with `// nosec S101`.
+- Two Slack tokens joined by one hyphen are one long body and give one finding.
+- A classic GitHub token inside a fine-grained GitHub token gives two findings of S102.
+- A shape split across a line break gives no finding.
+
 ## Security
 
 - The default profile leaves out three rules and two directory names. It never hides them in silence. The summary line names the count of left-out directories, and the JSON output holds the same count.
@@ -296,6 +328,8 @@ The dependency checks report under their own IDs.
 - The walk holds the byte path of every directory it enters and skips a directory it has seen. A bind-mount loop costs one visit. A directory reached by two different paths counts twice.
 - The output writes each byte outside printable ASCII as `\xNN`. A hostile path cannot inject a control sequence into a terminal.
 - A file that the scan cannot read counts as skipped. The summary line shows the count, so a skipped file never hides.
+- The four shape rules never print a secret. A finding holds a fixed message, a line and a column. The text, the JSON and the SARIF output hold no byte of the match.
+- The shapes read bytes only. Their work grows in step with the size of the file. No input makes it grow with the square of the size. The regex engine has no backtracking.
 - The scan runs no code from the files it reads.
 - A regex rule uses the regex engine of the standard library. That engine bounds its states, its instructions and its repeat counts. A pattern with a counted repeat above the bound is a fault at load. A rule file that faults leaves no expression behind.
 - A regex rule compiles once, when the rule file loads, and not once per file. The matches of one file stop at the bound of the findings of a run. The line count is one pass over the bytes, so many matches cost linear time.

@@ -19,6 +19,7 @@ import advise;
 import deps;
 import links;
 import custom;
+import secret_shapes;
 import config;
 import rules_taint;
 import semver from "rekanalar/goose-semver@v1.0.1";
@@ -256,6 +257,10 @@ fn reg_ensure() {
     reg_put("ADVISORY", SEV_CRITICAL, CONF_HIGH, 0, "", "a dependency has a known advisory");
     reg_put("G117", SEV_MEDIUM, CONF_MEDIUM, 499, "", "a secret-named value goes into a JSON writer");
     reg_put("B415", SEV_HIGH, CONF_HIGH, 502, "", "an import of a web application bridge is in use");
+    reg_put("S101", SEV_CRITICAL, CONF_HIGH, 798, "", "an AWS access key ID is in the source");
+    reg_put("S102", SEV_CRITICAL, CONF_HIGH, 798, "", "a GitHub token is in the source");
+    reg_put("S103", SEV_HIGH, CONF_HIGH, 798, "", "a Slack token is in the source");
+    reg_put("S104", SEV_CRITICAL, CONF_HIGH, 321, "", "a private key header is in the source");
     // Three rules stay out of the default profile. Their findings
     // are common and rarely a defect in a real project.
     tier_set("G304", TIER_STRICT);

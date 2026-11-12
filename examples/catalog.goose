@@ -65,10 +65,10 @@ fn deps_count(root: const u8[:], policy: const u8[:], adv: const u8[:]) -> i64 {
 }
 
 fn main() {
-    rule_file("examples/rules/secrets.json", ["SEC01", "SEC02", "SEC03", "SEC04"]);
+    rule_file("examples/rules/secrets.json", ["SEC03", "SEC04"]);
     rule_file("examples/rules/house-style.json", ["HOUSE01", "HOUSE02", "HOUSE03", "HOUSE04"]);
     rule_file("examples/rules/comments.json", ["NOTE01", "NOTE02", "NOTE03", "NOTE04"]);
-    rule_file("examples/rules/regex.json", ["RX01", "RX02", "RX03", "RX04", "RX05", "RX06"]);
+    rule_file("examples/rules/regex.json", ["RX03", "RX04", "RX06"]);
 
     let strict = "examples/policy/strict.json";
     let several = "examples/advisories/several.json";
