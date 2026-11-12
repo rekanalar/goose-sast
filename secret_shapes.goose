@@ -30,7 +30,7 @@ fn shape_text(row: i64) -> const u8[:] {
     if row == 2 { return "[^A-Za-z0-9_]github_pat_[A-Za-z0-9_]{82}"; }
     if row == 3 { return "[^A-Za-z0-9]xox[bpars]-[A-Za-z0-9-]{10,72}"; }
     if row == 4 { return "[^A-Za-z0-9]xapp-[0-9]-[A-Za-z0-9-]{10,80}"; }
-    return "-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH|PGP|ENCRYPTED) )?PRIVATE KEY-----|-----BEGIN PGP PRIVATE KEY BLOCK-----";
+    return "-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH|PGP|ENCRYPTED) )?PRIVATE KEY-----|-----BEGIN PGP PRIVATE[ ]KEY BLOCK-----";
 }
 
 // shape_owner gives the place of the rule of a row among S101 to S104.
