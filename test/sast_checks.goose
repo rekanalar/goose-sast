@@ -1,16 +1,14 @@
 // The helpers and the globals that the tests share.
-namespace common;
+namespace sast_checks;
 
 import std;
 import os;
 import json;
 import sast from "..";
 import semver from "rekanalar/goose-semver@v1.0.1";
+import site_table;
 
 var fails: i64 = 0;
-var site_src: const u8[:][>..] = [];
-var site_id: const u8[:][>..] = [];
-var site_kind: i64[>..] = [];
 
 fn check(ok: bool, what: const u8[:]) {
     if !ok {
@@ -268,9 +266,9 @@ fn g602_lines(src: const u8[:], out: i64[>..]&) {
 
 // site records one row of the table.
 fn site(src: const u8[:], id: const u8[:], kind: i64) {
-    site_src.push(src);
-    site_id.push(id);
-    site_kind.push(kind);
+    site_table::site_src.push(src);
+    site_table::site_id.push(id);
+    site_table::site_kind.push(kind);
 }
 
 // bidi_src writes the source of a bidirectional control character into

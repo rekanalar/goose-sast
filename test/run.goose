@@ -10,7 +10,7 @@ import id_site_tests;
 import bidi_marks_tests;
 import reg_must_tests;
 import ledger_tests;
-import common;
+import sast_checks;
 import os;
 import json;
 import semver from "rekanalar/goose-semver@v1.0.1";
